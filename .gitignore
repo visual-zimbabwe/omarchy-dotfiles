@@ -1,0 +1,25 @@
+# Logs and state files
+*.log
+*.bak
+*.bak.*
+*.tmp
+*.sock
+
+# Cache directories
+__pycache__/
+*.pyc
+.cache/
+
+# Sensitive files / keys
+*.pem
+*.key
+id_rsa
+id_ed25519
+known_hosts
+authorized_keys
+.env
+.env.*
+
+# OS generated files
+.DS_Store
+Thumbs.db

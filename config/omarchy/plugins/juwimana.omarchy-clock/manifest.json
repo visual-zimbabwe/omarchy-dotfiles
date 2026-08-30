@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "juwimana.omarchy-clock",
+  "name": "Omarchy Clock",
+  "version": "1.0.0",
+  "author": "juwimana",
+  "license": "MIT",
+  "description": "Minimalist native Omarchy clock app with World Clock, Alarm, Stopwatch, and Timer.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Omarchy Clock",
+    "description": "Native clock with World Clock, Alarm, Stopwatch, and Timer",
+    "category": "Utilities",
+    "allowMultiple": false,
+    "defaultSection": "center"
+  }
+}

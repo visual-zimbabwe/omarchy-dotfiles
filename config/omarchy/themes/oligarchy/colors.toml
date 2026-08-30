@@ -1,0 +1,32 @@
+# Oligarchy — a propaganda-poster LIGHT theme for Omarchy
+# Palette extracted from the "Beware the Omarchy Oligarchy" poster:
+# cream paper, brick red, ink black, with aged ochre/olive/slate secondaries.
+# Selection mimics the poster's red banners (cream text on red).
+#
+# ANSI "white" (7 and 15) is inked rather than pale: on cream paper a literal
+# white is invisible. Omarchy's own light themes invert it the same way, and
+# newer Omarchy force-sets color7 to `foreground` regardless.
+
+accent = "#c0271c"
+cursor = "#c0271c"
+foreground = "#1a160f"
+background = "#eae0cb"
+selection_foreground = "#eae0cb"
+selection_background = "#c0271c"
+
+color0  = "#1a160f"
+color1  = "#b0281e"
+color2  = "#5e6b33"
+color3  = "#a9791f"
+color4  = "#3e5a78"
+color5  = "#7e3b4e"
+color6  = "#2e6e6a"
+color7  = "#3b342a"
+color8  = "#6b6152"
+color9  = "#c0271c"
+color10 = "#77863f"
+color11 = "#c99a3a"
+color12 = "#4e7095"
+color13 = "#9a5266"
+color14 = "#3e8a84"
+color15 = "#1a160f"

@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+: "${XDG_RUNTIME_DIR:?Radio Atlas requires XDG_RUNTIME_DIR}"
+runtime_dir="$XDG_RUNTIME_DIR/omarchy-radio-atlas"
+data_root=${XDG_DATA_HOME:-$HOME/.local/share}
+state_dir="$data_root/radio-atlas"
+state_file="$state_dir/state.json"
+state_lock="$state_dir/state.lock"
+max_json_bytes=4194304
+install -d -m 700 "$runtime_dir" "$state_dir"
+
+exec 9>"$state_lock"
+flock -x 9
+
+file_within_limit() {
+  local path=$1
+  [[ -s $path ]] && (( $(stat -c '%s' -- "$path") <= max_json_bytes ))
+}
+
+valid_state_file() {
+  local path=$1
+  file_within_limit "$path" && jq -e -s '
+    length == 1 and (.[0]
+      | type == "object"
+      and (.favorites | type == "array")
+      and (.favorites | length <= 500)
+      and (.recent | type == "array")
+      and (.recent | length <= 30)
+      and ((.volume // 70) | type == "number")
+      and ((.volume // 70) >= 0 and (.volume // 70) <= 100))
+  ' "$path" >/dev/null 2>&1
+}
+
+ensure_state() {
+  if [[ ! -e $state_file ]]; then
+    printf '{"favorites":[],"recent":[],"volume":70}\n' > "$state_file"
+    return
+  fi
+  valid_state_file "$state_file" && return
+  echo "Radio Atlas saved state is invalid; refusing to overwrite $state_file" >&2
+  exit 4
+}
+
+ensure_runtime_array() {
+  local path=$1
+  if ! file_within_limit "$path" \
+    || ! jq -e -s 'length == 1 and (.[0] | type == "array" and length <= 500)' \
+      "$path" >/dev/null 2>&1; then
+    printf '[]\n' > "$path"
+  fi
+}
+
+ensure_runtime_data() {
+  ensure_runtime_array "$runtime_dir/results.json"
+  ensure_runtime_array "$runtime_dir/world.json"
+  ensure_runtime_array "$runtime_dir/playlist.json"
+  ensure_runtime_array "$runtime_dir/favorite-selection.json"
+}
+
+find_station() {
+  local uuid=$1
+  local source station
+  for source in "$runtime_dir/favorite-selection.json" "$runtime_dir/playlist.json" \
+    "$runtime_dir/results.json" "$runtime_dir/world.json"; do
+    station=$(jq -c --arg uuid "$uuid" \
+      'first(.[] | select(.uuid == $uuid)) // empty' "$source" 2>/dev/null || true)
+    if [[ -n $station ]]; then
+      printf '%s\n' "$station"
+      return
+    fi
+  done
+  jq -c --arg uuid "$uuid" \
+    'first((.favorites[]?, .recent[]?) | select(.uuid == $uuid)) // empty' \
+    "$state_file" 2>/dev/null
+}
+
+write_state() {
+  local filter=$1
+  local station=$2
+  local temporary
+  temporary=$(mktemp "$state_dir/state.XXXXXX")
+  jq -c --argjson station "$station" "$filter" "$state_file" > "$temporary"
+  if ! valid_state_file "$temporary"; then
+    rm -f "$temporary"
+    echo 'Radio Atlas could not save this station safely' >&2
+    return 4
+  fi
+  mv "$temporary" "$state_file"
+}
+
+write_volume() {
+  local volume=$1
+  local temporary
+  temporary=$(mktemp "$state_dir/state.XXXXXX")
+  jq -c --argjson volume "$volume" '.volume = $volume' "$state_file" > "$temporary"
+  if ! valid_state_file "$temporary"; then
+    rm -f "$temporary"
+    echo 'Radio Atlas could not save the volume safely' >&2
+    return 4
+  fi
+  mv "$temporary" "$state_file"
+}
+
+ensure_state
+action=${1:-get}
+case "$action" in
+  get)
+    ;;
+  favorite)
+    ensure_runtime_data
+    uuid=${2:-}
+    [[ $uuid =~ ^[0-9A-Fa-f-]{20,}$ ]] || { echo 'Invalid station id' >&2; exit 2; }
+    station=$(find_station "$uuid")
+    [[ -n $station ]] || { echo 'Station is not in the current data set' >&2; exit 3; }
+    write_state '
+      if any(.favorites[]?; .uuid == $station.uuid)
+      then .favorites = [.favorites[] | select(.uuid != $station.uuid)]
+      else .favorites = ([$station] + [.favorites[] | select(.uuid != $station.uuid)])[:500]
+      end
+    ' "$station"
+    ;;
+  played)
+    ensure_runtime_data
+    uuid=${2:-}
+    [[ $uuid =~ ^[0-9A-Fa-f-]{20,}$ ]] || { echo 'Invalid station id' >&2; exit 2; }
+    station=$(find_station "$uuid")
+    [[ -n $station ]] || { echo 'Station is not in the current data set' >&2; exit 3; }
+    write_state '.recent = ([$station] + [.recent[] | select(.uuid != $station.uuid)])[:30]' "$station"
+    ;;
+  volume)
+    volume=${2:-}
+    [[ $volume =~ ^[0-9]+$ ]] \
+      || { echo 'Volume must be an integer from 0 to 100' >&2; exit 2; }
+    (( volume >= 0 && volume <= 100 )) \
+      || { echo 'Volume must be an integer from 0 to 100' >&2; exit 2; }
+    write_volume "$volume"
+    ;;
+  *)
+    echo "Unknown action: $action" >&2
+    exit 2
+    ;;
+esac
+
+cat "$state_file"
