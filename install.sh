@@ -98,11 +98,13 @@ for item in config/*; do
   fi
 done
 
-# Reload Omarchy shell and plugins
+# Reload Omarchy shell, apply theme, and reload Hyprland
 if command -v omarchy &>/dev/null; then
-  echo -e "${GREEN}--> Refreshing Omarchy shell and plugins...${RESET}"
-  omarchy refresh shell 2>/dev/null || true
-  omarchy refresh hyprland 2>/dev/null || true
+  echo -e "${GREEN}--> Applying theme, plugins, and restarting Omarchy shell...${RESET}"
+  omarchy-shell shell rescanPlugins 2>/dev/null || true
+  omarchy restart shell 2>/dev/null || true
+  omarchy theme set evergreen 2>/dev/null || true
+  hyprctl reload 2>/dev/null || true
 fi
 
 echo -e "\n${BOLD}${GREEN}✔ Full Omarchy environment restored successfully!${RESET}"
