@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""
+stream-torrent - Advanced CLI Streaming Engine for WebTorrent and Peerflix.
+Ensures top-tier trackers are attached to magnet links for instant peer discovery.
+Supports interactive Episode & Season Pack selection, MPV playlist playback,
+and guaranteed 100% automatic cache cleanup upon closing mpv or terminating.
+"""
+
+import sys
+import os
+import signal
+import atexit
+import subprocess
+import urllib.parse
+import shutil
+from pathlib import Path
+
+# High-reliability tier-1 public trackers
+PUBLIC_TRACKERS = [
+    "udp://tracker.opentrackr.org:1337/announce",
+    "udp://open.stealth.si:80/announce",
+    "udp://tracker.torrent.eu.org:451/announce",
+    "udp://tracker.openbittorrent.com:6969/announce",
+    "http://tracker.openbittorrent.com:80/announce",
+    "udp://opentracker.i2p.rocks:6969/announce",
+    "udp://tracker.internetwarriors.net:1337/announce",
+    "udp://explodie.org:6969/announce",
+    "udp://tracker.cyberia.is:6969/announce",
+    "udp://tracker.moeking.me:6969/announce",
+    "udp://p4p.arenabg.com:1337/announce",
+    "udp://movies.zsw.ca:6969/announce",
+    "wss://tracker.openwebtorrent.com",
+    "wss://tracker.btorrent.xyz",
+    "wss://tracker.webtorrent.dev",
+]
+
+CACHE_DIRS = [
+    Path.home() / ".cache" / "webtorrent",
+    Path("/tmp/webtorrent"),
+]
+
+HELP_TEXT = """\033[1;36m
+  ⚡ stream-torrent - Instant Torrent & Magnet MPV Streamer
+\033[0m
+Usage:
+  \033[1;32mstream-torrent <magnet-or-infohash> [options]\033[0m
+
+Options:
+  \033[1;33m-i, --interactive\033[0m       Interactively choose an episode/file for Season Packs (Default)
+  \033[1;33m-p, --playlist\033[0m          Stream entire season as an MPV playlist (use < and > in MPV to switch)
+  \033[1;33m-s, --select <index>\033[0m    Stream specific file index directly
+  \033[1;33m-o, --out <dir>\033[0m         Save video permanently to destination folder
+  \033[1;33m--peerflix\033[0m              Use Peerflix engine instead of WebTorrent
+  \033[1;33m-h, --help\033[0m              Show this help message
+
+Hotkeys in MPV:
+  • \033[1;36m<\033[0m / \033[1;36m>\033[0m : Previous / Next episode (in playlist mode)
+  • \033[1;36mj\033[0m : Cycle audio & subtitle tracks
+  • \033[1;36mv\033[0m : Toggle subtitles on/off
+  • \033[1;36mSpace\033[0m : Pause / Resume
+  • \033[1;36mq\033[0m : Quit playback
+"""
+
+def enhance_magnet(magnet: str) -> str:
+    if not magnet.startswith("magnet:"):
+        # If it's a bare infohash
+        if len(magnet) in [40, 64] and all(c in "0123456789abcdefABCDEF" for c in magnet):
+            magnet = f"magnet:?xt=urn:btih:{magnet}"
+        else:
+            return magnet
+
+    tracker_params = "".join(f"&tr={urllib.parse.quote(t)}" for t in PUBLIC_TRACKERS if t not in magnet)
+    return magnet + tracker_params
+
+def purge_cache(custom_out: bool = False):
+    if custom_out:
+        return
+
+    for cdir in CACHE_DIRS:
+        if cdir.exists():
+            try:
+                shutil.rmtree(cdir, ignore_errors=True)
+            except Exception:
+                pass
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help"]:
+        print(HELP_TEXT)
+        sys.exit(0)
+
+    raw_magnet = sys.argv[1]
+    enhanced = enhance_magnet(raw_magnet)
+    args = sys.argv[2:]
+
+    # Parse CLI flags
+    save_dir = None
+    playlist_mode = False
+    select_index = None
+    interactive_mode = True  # Enabled by default for multi-file season packs
+    use_peerflix = False
+    extra_passthrough = []
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ["-o", "--out", "--save"] and i + 1 < len(args):
+            save_dir = args[i + 1]
+            i += 2
+        elif arg.startswith("--out="):
+            save_dir = arg.split("=", 1)[1]
+            i += 1
+        elif arg in ["-p", "--playlist", "--all"]:
+            playlist_mode = True
+            interactive_mode = False
+            i += 1
+        elif arg in ["-s", "--select", "-e", "--episode"] and i + 1 < len(args):
+            select_index = args[i + 1]
+            interactive_mode = False
+            i += 2
+        elif arg.startswith("--select=") or arg.startswith("--episode="):
+            select_index = arg.split("=", 1)[1]
+            interactive_mode = False
+            i += 1
+        elif arg in ["-i", "--interactive", "--interactive-select"]:
+            interactive_mode = True
+            playlist_mode = False
+            i += 1
+        elif arg in ["--no-interactive"]:
+            interactive_mode = False
+            i += 1
+        elif arg in ["--peerflix"]:
+            use_peerflix = True
+            i += 1
+        else:
+            extra_passthrough.append(arg)
+            i += 1
+
+    custom_out = save_dir is not None
+    primary_cache = CACHE_DIRS[0]
+
+    # Pre-clean leftover cache from previous runs
+    if not custom_out:
+        purge_cache(custom_out=False)
+        primary_cache.mkdir(parents=True, exist_ok=True)
+
+    # Register cleanup
+    if not custom_out:
+        atexit.register(purge_cache, False)
+
+        def signal_handler(signum, frame):
+            purge_cache(False)
+            sys.exit(0)
+
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            try:
+                signal.signal(sig, signal_handler)
+            except (ValueError, AttributeError):
+                pass
+
+    if use_peerflix:
+        cmd = ["peerflix", enhanced, "--mpv"]
+        if save_dir:
+            cmd += ["--path", save_dir]
+        if select_index is not None:
+            cmd += ["--index", str(select_index)]
+        if playlist_mode:
+            cmd += ["--all"]
+        cmd += extra_passthrough
+        print(f"\033[1;34m[Stream] Launching Peerflix engine with {len(PUBLIC_TRACKERS)} trackers...\033[0m")
+    else:
+        # WebTorrent engine
+        cmd = ["webtorrent", enhanced, "--mpv"]
+        if save_dir:
+            cmd += ["-o", save_dir]
+        else:
+            cmd += ["-o", str(primary_cache)]
+
+        if select_index is not None:
+            cmd += ["--select", str(select_index)]
+        elif playlist_mode:
+            cmd += ["--playlist"]
+        elif interactive_mode:
+            cmd += ["-i"]
+
+        cmd += extra_passthrough
+        print(f"\033[1;34m[Stream] Launching WebTorrent engine with {len(PUBLIC_TRACKERS)} trackers...\033[0m")
+        if playlist_mode:
+            print("\033[1;35m📋 Playlist Mode Active:\033[0m All episodes queued in MPV. Use \033[1;36m<\033[0m and \033[1;36m>\033[0m in MPV to switch.")
+        elif interactive_mode:
+            print("\033[1;32m🎯 Season Pack Mode:\033[0m If this is a season pack, episode selection will appear momentarily.")
+
+    try:
+        subprocess.run(cmd)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if not custom_out:
+            purge_cache(False)
+            print("\n\033[1;32m🧹 Cache cleared successfully.\033[0m")
+
+if __name__ == "__main__":
+    main()

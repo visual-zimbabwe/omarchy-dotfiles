@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "juwimana.strat-journal",
+  "name": "Strat Journal",
+  "version": "1.0.0",
+  "author": "juwimana",
+  "license": "MIT",
+  "description": "Strat methodology trading journal, live FTFC monitor, and review station for GOOGL",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "src/BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Strat Journal",
+    "description": "Strat execution logger, live FTFC tracker, and statistical review station",
+    "category": "Finance",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

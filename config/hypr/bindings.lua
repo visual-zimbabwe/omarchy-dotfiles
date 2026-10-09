@@ -29,4 +29,5 @@
 -- o.bind("SUPER + PERIOD", nil, "omarchy-shell shell toggle omarchy.emojis")
 
 o.bind("SUPER + N", "Notification Center", "omarchy-shell jankeesvw.notification-center toggle")
+o.bind("SUPER + CTRL + J", "omanki", "omarchy-shell shell toggle yamz8.omanki")
 

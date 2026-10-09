@@ -3,7 +3,6 @@ import QtQuick.Controls as QQC
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
-import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 import "RadioModel.js" as RadioModel
@@ -24,6 +23,7 @@ Item {
   property string mode: "world"
   property string activeCountryCode: ""
   property string activeCountryName: ""
+  property bool helpVisible: false
   property int selectedIndex: -1
   property var selectedStation: null
   property bool keyboardSelectionVisible: false
@@ -41,11 +41,22 @@ Item {
 
   property bool playerRunning: false
   property bool playerPaused: false
+  property string streamError: ""
   property bool playerMuted: false
   property int playerVolume: 70
   property int reportedVolume: 70
   property int pendingVolume: -1
   property string playerTitle: ""
+  property string playerOutput: ""
+  property var audioOutputs: []
+  property string outputsError: ""
+  property bool outputMenuOpen: false
+  readonly property var outputChoices: {
+    var rows = [{ id: "", label: "System default" }]
+    for (var i = 0; i < audioOutputs.length; i++) rows.push(audioOutputs[i])
+    return rows
+  }
+
   property var playingStation: null
   property string playingStationUuid: ""
   property string recordedStationUuid: ""
@@ -103,16 +114,83 @@ Item {
   property color mapLand: lightTheme ? "#a9aaa6" : "#283039"
   property color mapGrid: lightTheme ? "#3f454a" : "#7d8791"
 
-  readonly property int cardWidth: Math.min(Style.space(1180), panel.width - Style.gapsOut * 2)
-  readonly property int cardHeight: Math.min(Style.space(760), panel.height - Style.gapsOut * 2)
+  property bool windowSetupReady: false
+  property bool windowFrameReady: false
+  property string pendingOpenPayload: ""
+  readonly property int preferredWidth: Style.space(1180)
+  readonly property int preferredHeight: Style.space(760)
+  readonly property string windowPath:
+    Qt.resolvedUrl("radio-window").toString().replace(/^file:\/\//, "")
+  readonly property int cardWidth: panel.width
+  readonly property int cardHeight: panel.height
   readonly property int headerHeight: Style.space(68)
   readonly property int sidebarWidth: Math.min(Style.space(390), cardWidth * 0.39)
+  readonly property var controlSections: [
+    {
+      title: "KEYBOARD",
+      inputWidth: 112,
+      controls: [
+        { input: "/", action: "Search" },
+        { input: "UP / DOWN", action: "Select station" },
+        { input: "ENTER", action: "Play selected station" },
+        { input: "SPACE", action: "Play or pause" },
+        { input: "R", action: "Tune randomly" },
+        { input: "F", action: "Favorite selected station" },
+        { input: "M", action: "Mute or unmute" },
+        { input: "+ / -", action: "Change volume" },
+        { input: "ESC", action: "Back, clear, or close" },
+        { input: "?", action: "Show or hide controls" }
+      ]
+    },
+    {
+      title: "MOUSE AND BAR",
+      inputWidth: 124,
+      controls: [
+        { input: "DRAG / FLICK", action: "Spin globe" },
+        { input: "GLOBE WHEEL", action: "Zoom" },
+        { input: "CLICK SIGNAL", action: "Play station" },
+        { input: "CLICK COUNTRY", action: "Browse stations" },
+        { input: "BAR LEFT", action: "Open or close" },
+        { input: "BAR MIDDLE", action: "Tune randomly" },
+        { input: "BAR RIGHT", action: "Stop playback" },
+        { input: "BAR WHEEL", action: "Change volume" },
+        { input: "SPEAKER", action: "Choose audio output" }
+      ]
+    }
+  ]
+
+  function isHelpKey(event) {
+    return event.key === Qt.Key_Question || event.text === "?"
+      || (event.key === Qt.Key_Slash && (event.modifiers & Qt.ShiftModifier))
+  }
+
+  function toggleControls() {
+    helpVisible = !helpVisible
+    outputMenuOpen = false
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  function registerWindowSetup() {
+    windowSetupReady = false
+    if (!windowSetupProcess.running) windowSetupProcess.running = true
+  }
 
   function open(payloadJson) {
+    if (!windowSetupReady) {
+      pendingOpenPayload = payloadJson || "{}"
+      return
+    }
+    openWindow(payloadJson)
+  }
+
+  function openWindow(payloadJson) {
     var payload = ({})
     try { payload = JSON.parse(payloadJson || "{}") } catch (error) { payload = ({}) }
 
     opened = true
+    windowFrameReady = false
+    windowRevealTimer.stop()
+    panel.visible = true
     fetchError = ""
     loadState()
     if (payload.action === "random") {
@@ -124,7 +202,13 @@ Item {
   }
 
   function close() {
+    helpVisible = false
+    outputMenuOpen = false
+    globe.stopKineticRotation(true)
     opened = false
+    windowFrameReady = false
+    windowRevealTimer.stop()
+    panel.visible = false
     worldExpandTimer.stop()
     if (worldExpandProcess.running) worldExpandProcess.running = false
   }
@@ -135,15 +219,28 @@ Item {
       shell.hide((manifest && manifest.id) || "akshar.radio-atlas")
   }
 
+  function scheduleWindowReveal() {
+    if (windowFrameReady || !panel.visible || !panel.backingWindowVisible) return
+    windowRevealTimer.restart()
+  }
+
   function handleHyprlandEvent(event) {
-    if (!opened || String(event && event.name || "") !== "openwindow") return
+    var eventName = String(event && event.name || "")
+    if (eventName === "configreloaded") {
+      windowSetupReloadTimer.restart()
+      return
+    }
+    if (!opened || eventName !== "openwindow") return
     var parts = []
     try {
       parts = event.parse(4)
     } catch (error) {
       parts = String(event && event.data || "").split(",")
     }
-    if (String(parts[2] || "") === "org.omarchy.screensaver") dismiss()
+    var windowClass = String(parts[2] || "")
+    if (windowClass === "org.omarchy.screensaver") {
+      dismiss()
+    }
   }
 
   function highlightStationCountry(station, focusGlobe) {
@@ -444,7 +541,10 @@ Item {
       var nextPlayingUuid = nextPlayingStation ? String(nextPlayingStation.uuid) : ""
       playerRunning = state.running === true
       playerPaused = state.paused === true
+      streamError = String(state.error || "").replace(/[\r\n\t]+/g, " ").slice(0, 200)
       playerMuted = state.muted === true
+      playerOutput = /^[A-Za-z0-9._:+-]{0,160}$/.test(String(state.output || ""))
+        ? String(state.output) : ""
       var nextVolume = Math.round(Number(state.volume === undefined ? 70 : state.volume))
       reportedVolume = isFinite(nextVolume) ? Math.max(0, Math.min(100, nextVolume)) : 70
       if (pendingVolume < 0) playerVolume = reportedVolume
@@ -506,6 +606,44 @@ Item {
     volumeProcess.errorOutput = ""
     volumeProcess.command = [root.playerPath, "volume", String(pendingVolume)]
     volumeProcess.running = true
+  }
+
+  function refreshOutputs() {
+    if (outputsProcess.running) return
+    outputsError = ""
+    outputsProcess.output = ""
+    outputsProcess.errorOutput = ""
+    outputsProcess.command = [playerPath, "outputs"]
+    outputsProcess.running = true
+  }
+
+  function selectOutput(value) {
+    var sink = String(value || "")
+    if (outputProcess.running) return
+    playerError = ""
+    outputProcess.submittedOutput = sink
+    outputProcess.output = ""
+    outputProcess.errorOutput = ""
+    outputProcess.command = sink
+      ? [playerPath, "output", sink]
+      : [playerPath, "output"]
+    outputProcess.running = true
+  }
+
+  function toggleOutputMenu() {
+    if (outputMenuOpen) {
+      outputMenuOpen = false
+      return
+    }
+    outputMenuOpen = true
+    refreshOutputs()
+  }
+
+  function outputLabel(sink) {
+    for (var i = 0; i < audioOutputs.length; i++) {
+      if (audioOutputs[i].id === sink) return audioOutputs[i].label
+    }
+    return sink
   }
 
   function loadState() {
@@ -655,6 +793,18 @@ Item {
     atomicWrites: true
     printErrors: true
     onSaveFailed: root.localError = "Favorite could not be updated"
+  }
+
+  Process {
+    id: windowSetupProcess
+    command: [root.windowPath, String(root.preferredWidth), String(root.preferredHeight)]
+    onExited: function(exitCode) {
+      root.windowSetupReady = true
+      if (!root.pendingOpenPayload) return
+      var payload = root.pendingOpenPayload
+      root.pendingOpenPayload = ""
+      root.openWindow(payload)
+    }
   }
 
   Process {
@@ -820,6 +970,76 @@ Item {
   }
 
   Process {
+    id: outputsProcess
+    property string output: ""
+    property string errorOutput: ""
+    command: []
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: outputsProcess.output = text
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: outputsProcess.errorOutput = text
+    }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) {
+        root.outputsError = "Audio outputs are unavailable"
+        root.audioOutputs = []
+        return
+      }
+      var parsed = null
+      try {
+        var document = JSON.parse(outputsProcess.output || "{}")
+        if (document && Array.isArray(document.outputs)) parsed = document.outputs
+      } catch (error) {
+        parsed = null
+      }
+      if (parsed === null) {
+        root.outputsError = "Audio outputs are unavailable"
+        root.audioOutputs = []
+        return
+      }
+      root.audioOutputs = parsed.filter(function(row) {
+        return row && typeof row === "object"
+          && /^[A-Za-z0-9._:+-]{1,160}$/.test(String(row.id || ""))
+      }).map(function(row) {
+        return {
+          id: String(row.id),
+          label: String(row.label || row.id).replace(/[\r\n\t]+/g, " ").slice(0, 160)
+        }
+      })
+      root.outputsError = ""
+    }
+  }
+
+  Process {
+    id: outputProcess
+    property string submittedOutput: ""
+    property string output: ""
+    property string errorOutput: ""
+    command: []
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: outputProcess.output = text
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: outputProcess.errorOutput = text
+    }
+    onExited: function(exitCode) {
+      if (exitCode === 0) {
+        root.statusReady = true
+        root.playerError = ""
+        root.playerOutput = outputProcess.submittedOutput
+        root.outputMenuOpen = false
+        return
+      }
+      root.playerError = "Could not change audio output"
+    }
+  }
+
+  Process {
     id: playerActionProcess
     property string action: ""
     property string output: ""
@@ -946,6 +1166,22 @@ Item {
   }
 
   Timer {
+    id: windowSetupReloadTimer
+    interval: 100
+    repeat: false
+    onTriggered: root.registerWindowSetup()
+  }
+
+  Timer {
+    id: windowRevealTimer
+    interval: 50
+    repeat: false
+    onTriggered: {
+      if (panel.visible && panel.backingWindowVisible) root.windowFrameReady = true
+    }
+  }
+
+  Timer {
     id: volumeTimer
     interval: 90
     repeat: false
@@ -953,6 +1189,7 @@ Item {
   }
 
   Component.onCompleted: {
+    registerWindowSetup()
     statusInitProcess.command = [playerPath, "status"]
     statusInitProcess.running = true
   }
@@ -962,23 +1199,27 @@ Item {
     function onRawEvent(event) { root.handleHyprlandEvent(event) }
   }
 
-  PanelWindow {
+  FloatingWindow {
     id: panel
-    visible: root.opened
-    anchors { top: true; bottom: true; left: true; right: true }
-    mask: Region { item: card }
-    color: "transparent"
-    WlrLayershell.namespace: "omarchy-radio-atlas"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: root.opened && cardHover.hovered
-      ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
-    exclusionMode: ExclusionMode.Ignore
+    visible: false
+    title: "Radio Atlas"
+    color: root.background
+    implicitWidth: root.preferredWidth
+    implicitHeight: root.preferredHeight
+    minimumSize: Qt.size(Style.space(800), Style.space(560))
+    HyprlandWindow.opacity: root.windowFrameReady ? 1 : 0
+
+    onVisibleChanged: {
+      if (visible) root.scheduleWindowReveal()
+      if (!visible && root.opened) root.dismiss()
+    }
+    onBackingWindowVisibleChanged: root.scheduleWindowReveal()
+    onWidthChanged: root.scheduleWindowReveal()
+    onHeightChanged: root.scheduleWindowReveal()
 
     BorderSurface {
       id: card
-      width: root.cardWidth
-      height: root.cardHeight
-      anchors.centerIn: parent
+      anchors.fill: parent
       color: root.background
       borderSpec: Border.surfaceSpec("menu", "border", root.border, Math.max(1, Style.normalBorderWidth))
       radius: Style.cornerRadius
@@ -987,11 +1228,6 @@ Item {
         id: cardMouse
         anchors.fill: parent
         onClicked: keyCatcher.forceActiveFocus()
-      }
-
-      HoverHandler {
-        id: cardHover
-        onHoveredChanged: if (hovered) keyCatcher.forceActiveFocus()
       }
 
       Item {
@@ -1014,8 +1250,19 @@ Item {
             return
           }
 
+          if (root.helpVisible) {
+            if (event.key === Qt.Key_Escape || root.isHelpKey(event)) {
+              root.toggleControls()
+              event.accepted = true
+            }
+            return
+          }
+
           if (event.key === Qt.Key_Escape) {
             root.dismiss()
+            event.accepted = true
+          } else if (root.isHelpKey(event)) {
+            root.toggleControls()
             event.accepted = true
           } else if (event.key === Qt.Key_Slash) {
             searchField.forceActiveFocus()
@@ -1096,7 +1343,7 @@ Item {
 
         Button {
           id: randomButton
-          anchors.right: closeButton.left
+          anchors.right: helpButton.left
           anchors.rightMargin: Style.spacing.xs
           anchors.verticalCenter: parent.verticalCenter
           iconText: "\uf074"
@@ -1105,6 +1352,22 @@ Item {
           foreground: root.foreground
           accent: root.accent
           onClicked: root.tuneRandom()
+        }
+
+        Button {
+          id: helpButton
+          anchors.right: closeButton.left
+          anchors.rightMargin: Style.spacing.xs
+          anchors.verticalCenter: parent.verticalCenter
+          text: "?"
+          tooltipText: root.helpVisible ? "Hide controls (?)" : "Show controls (?)"
+          selected: root.helpVisible
+          focusable: true
+          foreground: root.foreground
+          accent: root.accent
+          Accessible.role: Accessible.Button
+          Accessible.name: tooltipText
+          onClicked: root.toggleControls()
         }
 
         Button {
@@ -1135,6 +1398,7 @@ Item {
         anchors.right: parent.right
         anchors.top: header.bottom
         anchors.bottom: parent.bottom
+        visible: !root.helpVisible
         z: 2
 
         Item {
@@ -1182,7 +1446,7 @@ Item {
               ? root.fetchError || root.localError
               : (root.activeCountryName
                 ? root.activeCountryName + "  ·  click another country to browse"
-                : "Drag to rotate  ·  wheel to zoom  ·  click a signal or country")
+                : "Drag or flick to spin  ·  wheel to zoom  ·  click a signal or country")
             textFormat: Text.PlainText
             color: root.fetchError || root.localError ? root.urgent : root.dim
             font.family: Style.font.menuFamily
@@ -1278,6 +1542,7 @@ Item {
             currentIndex: root.selectedIndex
             boundsBehavior: Flickable.StopAtBounds
             cacheBuffer: 500
+            interactive: !root.outputMenuOpen
 
             QQC.ScrollBar.vertical: QQC.ScrollBar {}
 
@@ -1459,12 +1724,13 @@ Item {
               anchors.topMargin: Style.spacing.xs
               text: root.playerError
                 ? root.playerError
+                : root.streamError ? root.streamError + ". Play to retry, or Next."
                 : (!root.playerRunning ? "Choose a signal to begin"
                 : (root.playingTrackTitle ? root.playingTrackTitle + "  ·  " : "")
                   + (root.playerPaused ? "Paused" : "Live")
                   + (root.playlistCount > 1 ? "  ·  " + root.playlistCount + " stations queued" : ""))
               textFormat: Text.PlainText
-              color: root.playerError ? root.urgent : root.dim
+              color: root.playerError || root.streamError ? root.urgent : root.dim
               font.family: Style.font.menuFamily
               font.pixelSize: Style.font.caption
               elide: Text.ElideRight
@@ -1508,7 +1774,8 @@ Item {
               }
               Button {
                 iconText: root.playerRunning && !root.playerPaused ? "\uf04c" : "\uf04b"
-                tooltipText: root.playerRunning && !root.playerPaused ? "Pause" : "Play"
+                tooltipText: root.streamError ? "Retry station"
+                  : root.playerRunning && !root.playerPaused ? "Pause" : "Play"
                 enabled: !root.playerActionBusy
                 focusable: true
                 foreground: root.foreground
@@ -1539,12 +1806,28 @@ Item {
             }
 
             Row {
+              id: outputControls
               anchors.right: parent.right
               anchors.rightMargin: Style.spacing.md
               anchors.leftMargin: Style.spacing.sm
               anchors.bottom: parent.bottom
               anchors.bottomMargin: Style.spacing.sm
               spacing: Style.spacing.xs
+
+              Button {
+                id: outputButton
+                anchors.verticalCenter: parent.verticalCenter
+                iconText: "\uf0a1"
+                tooltipText: root.playerOutput
+                  ? "Audio output: " + root.outputLabel(root.playerOutput)
+                  : "Choose audio output"
+                active: root.playerOutput !== ""
+                enabled: !stopProcess.running && !outputProcess.running
+                focusable: true
+                foreground: root.foreground
+                accent: root.accent
+                onClicked: root.toggleOutputMenu()
+              }
 
               Button {
                 anchors.verticalCenter: parent.verticalCenter
@@ -1587,6 +1870,213 @@ Item {
                 font.family: Style.font.menuFamily
                 font.pixelSize: Style.font.caption
                 horizontalAlignment: Text.AlignRight
+              }
+            }
+          }
+
+          MouseArea {
+            visible: root.outputMenuOpen
+            anchors.fill: parent
+            z: 2
+            onClicked: root.outputMenuOpen = false
+          }
+
+          Rectangle {
+            id: outputMenu
+            visible: root.outputMenuOpen
+            readonly property point buttonPosition: {
+              sidebar.width
+              sidebar.height
+              outputControls.x
+              outputControls.y
+              return outputButton.mapToItem(
+                sidebar, outputButton.width / 2, 0)
+            }
+            x: Math.max(Style.spacing.sm, Math.min(
+              parent.width - width - Style.spacing.sm,
+              buttonPosition.x - width / 2))
+            y: buttonPosition.y - height - Style.spacing.xs
+            z: 3
+            width: Math.min(Style.space(300), parent.width - Style.spacing.md * 2)
+            height: outputMenuColumn.implicitHeight + Style.spacing.md * 2
+            radius: Style.cornerRadius
+            color: root.background
+            border.color: root.faint
+            border.width: 1
+
+            Accessible.role: Accessible.Pane
+            Accessible.name: "Audio output"
+
+            Column {
+              id: outputMenuColumn
+              anchors.top: parent.top
+              anchors.topMargin: Style.spacing.md
+              anchors.left: parent.left
+              anchors.right: parent.right
+              spacing: Style.spacing.xs
+
+              Text {
+                anchors.left: parent.left
+                anchors.leftMargin: Style.spacing.xs
+                text: "AUDIO OUTPUT"
+                textFormat: Text.PlainText
+                color: root.dim
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+              }
+
+              ListView {
+                id: outputList
+                width: parent.width
+                height: Math.min(contentHeight, Style.space(320))
+                model: root.outputChoices
+                spacing: Style.spacing.xs
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
+                QQC.ScrollBar.vertical: QQC.ScrollBar {
+                  policy: QQC.ScrollBar.AsNeeded
+                }
+
+                delegate: Button {
+                  id: outputOption
+                  required property var modelData
+                  width: ListView.view.width
+                  leftAlign: true
+                  text: outputOption.modelData.label
+                  selected: outputOption.modelData.id === root.playerOutput
+                  focusable: true
+                  foreground: root.foreground
+                  accent: root.accent
+                  Accessible.role: Accessible.Button
+                  Accessible.name: outputOption.modelData.label
+                  onClicked: root.selectOutput(outputOption.modelData.id)
+                }
+              }
+
+              Text {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.leftMargin: Style.spacing.xs
+                visible: root.audioOutputs.length === 0 && !outputsProcess.running
+                text: root.outputsError || "No other audio outputs found"
+                textFormat: Text.PlainText
+                color: root.outputsError ? root.urgent : root.dim
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.Wrap
+              }
+            }
+          }
+        }
+      }
+
+      Item {
+        id: controlsPane
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: header.bottom
+        anchors.bottom: parent.bottom
+        anchors.leftMargin: card.borderLeft
+        anchors.rightMargin: card.borderRight
+        anchors.bottomMargin: card.borderBottom
+        visible: root.helpVisible
+        z: 2
+        Accessible.role: Accessible.Pane
+        Accessible.name: "Radio Atlas controls"
+
+        Rectangle {
+          anchors.fill: parent
+          color: root.background
+        }
+
+        Column {
+          id: controlsContent
+          anchors.centerIn: parent
+          width: Math.min(parent.width - Style.spacing.panelPadding * 2, Style.space(920))
+          height: implicitHeight
+          spacing: Style.space(24)
+
+          Text {
+            text: "CONTROLS"
+            textFormat: Text.PlainText
+            color: root.foreground
+            font.family: Style.font.menuFamily
+            font.pixelSize: Style.font.heading
+            font.bold: true
+          }
+
+          Row {
+            id: controlsColumns
+            width: parent.width
+            height: implicitHeight
+            spacing: Style.space(72)
+
+            Repeater {
+              model: root.controlSections
+
+              delegate: Column {
+                id: controlSection
+                required property var modelData
+                width: (controlsColumns.width - controlsColumns.spacing) / 2
+                height: implicitHeight
+
+                Text {
+                  width: parent.width
+                  height: Style.space(36)
+                  text: controlSection.modelData.title
+                  textFormat: Text.PlainText
+                  color: root.dim
+                  font.family: Style.font.menuFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                  verticalAlignment: Text.AlignVCenter
+                }
+
+                Repeater {
+                  model: controlSection.modelData.controls
+
+                  delegate: Item {
+                    required property var modelData
+                    width: controlSection.width
+                    height: Style.space(38)
+
+                    Text {
+                      id: controlInput
+                      anchors.left: parent.left
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: Style.space(controlSection.modelData.inputWidth)
+                      text: modelData.input
+                      textFormat: Text.PlainText
+                      color: root.foreground
+                      font.family: Style.font.menuFamily
+                      font.pixelSize: Style.font.caption
+                      font.bold: true
+                      elide: Text.ElideRight
+                    }
+
+                    Text {
+                      anchors.left: controlInput.right
+                      anchors.right: parent.right
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: modelData.action
+                      textFormat: Text.PlainText
+                      color: root.dim
+                      font.family: Style.font.menuFamily
+                      font.pixelSize: Style.font.body
+                      elide: Text.ElideRight
+                    }
+
+                    Rectangle {
+                      anchors.left: parent.left
+                      anchors.right: parent.right
+                      anchors.bottom: parent.bottom
+                      height: 1
+                      color: root.faint
+                    }
+                  }
+                }
               }
             }
           }

@@ -1,0 +1,41 @@
+# Vernier: solitude's geometry, measured and regularised. Derivation in README.md.
+
+mode = "dark"
+
+# Brass, the only loud colour, and it means focus and active borders, nothing else.
+accent = "#b38956"
+
+selection = "#31363a"   # the selection highlight; foreground on it is 7.56:1
+muted     = "#868d93"   # comments: the lowest rung clearing AA on all four surfaces
+
+# Surface ladder on hue 236.68, even steps of 0.0307 before 8-bit quantisation.
+darker_background  = "#080a0b"   # deepest: code blocks, lock screen
+dark_background    = "#0e1112"   # chrome: bar, sidebars
+background         = "#14181a"   # canvas: terminal, app bodies
+lighter_background = "#1b1f21"   # raised: inputs, cards
+
+# Ink ladder, even OKLab steps of 0.061, emphasis lightest and dimmed darkest.
+bright_foreground = "#dde0e2"   # emphasis
+foreground        = "#c8ccd0"   # content ink
+light_foreground  = "#b3b9bd"   # chrome ink
+dark_foreground   = "#9fa6ab"   # secondary / dimmed
+
+# ANSI ring at C 0.105, lightness and hue solved for the largest worst-case separation under dichromacy.
+red     = "#e37d7d"   # exempt: 20 percent more chroma, since an error that fails to alarm has failed
+yellow  = "#b8ae5c"
+green   = "#82c68e"
+cyan    = "#27a6a2"
+blue    = "#80a4e6"
+magenta = "#ca8bc2"
+
+# Bright ring: a lightness step solved per family (0.108 to 0.119), chroma eased 5 percent then clipped to sRGB.
+bright_red     = "#ffa5a3"
+bright_yellow  = "#dbd183"
+bright_green   = "#abecb6"
+bright_cyan    = "#5ecbc6"
+bright_blue    = "#a8c7ff"
+bright_magenta = "#ecaee3"
+
+# The focused window is the only window wearing colour.
+hyprland_active_border   = "rgba(b38956ee) rgba(c8ccd0ee)"
+hyprland_inactive_border = "rgb(1b1f21)"

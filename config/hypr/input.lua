@@ -55,3 +55,10 @@
 -- Enable touchpad gestures for moving focus (helpful on scrolling layout).
 -- hl.gesture({ fingers = 3, direction = "left", action = function() hl.dispatch(hl.dsp.focus({ direction = "l" })) end })
 -- hl.gesture({ fingers = 3, direction = "right", action = function() hl.dispatch(hl.dsp.focus({ direction = "r" })) end })
+
+-- Apple Magic Mouse Configuration
+hl.device({
+  name = "magic-mouse",
+  scroll_factor = 0.5,
+  natural_scroll = true,
+})

@@ -1,0 +1,10 @@
+# Auto reload all feeds on startup
+auto-reload yes
+
+# Use default system browser for 'o' command
+browser "xdg-open %u"
+
+# Clean layout
+show-read-feeds yes
+feed-sort-order unread-article-count-asc
+article-sort-order date-desc

@@ -1,0 +1,26 @@
+name: Quattro
+accent: "#808b40"
+cursor: "#808b40"
+background: "#0D1319"
+foreground: "#F2ECCD"
+details: darker
+
+terminal_colors:
+  normal:
+    black:   "#0D1319"
+    red:     "#cf5a44"
+    green:   "#dbc66f"
+    yellow:  "#fff38a"
+    blue:    "#808b40"
+    magenta: "#e0a154"
+    cyan:    "#ebe36c"
+    white:   "#F2ECCD"
+  bright:
+    black:   "#7b8a8e"
+    red:     "#e07458"
+    green:   "#f8dc67"
+    yellow:  "#ffee63"
+    blue:    "#94a143"
+    magenta: "#ffb249"
+    cyan:    "#fff85e"
+    white:   "#f9f5ea"

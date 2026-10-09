@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "id": "mohamedmansour.finance",
+  "name": "Omafinance",
+  "version": "1.1.0",
+  "author": "mohamedmansour",
+  "license": "MIT",
+  "description": "Omafinance - Omarchy-style watchlist for the bar",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "src/BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Omafinance",
+    "description": "Pinned ticker on the bar, watchlist popup with search and charts",
+    "category": "Info",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshSeconds": 60,
+      "showTicker": true,
+      "showPrice": true,
+      "showChange": true,
+      "showLastUpdated": false,
+      "barSection": "right",
+      "changeStyle": "percent"
+    },
+    "schema": [
+      {
+        "key": "showTicker",
+        "type": "boolean",
+        "label": "Show ticker symbol",
+        "defaultValue": true
+      },
+      {
+        "key": "showPrice",
+        "type": "boolean",
+        "label": "Show price",
+        "defaultValue": true
+      },
+      {
+        "key": "showChange",
+        "type": "boolean",
+        "label": "Show change on bar",
+        "defaultValue": true
+      },
+      {
+        "key": "showLastUpdated",
+        "type": "boolean",
+        "label": "Show last updated time",
+        "defaultValue": false
+      },
+      {
+        "key": "barSection",
+        "type": "enum",
+        "label": "Bar position",
+        "options": ["left", "center", "right"],
+        "defaultValue": "right"
+      },
+      {
+        "key": "refreshSeconds",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 15,
+        "max": 3600,
+        "step": 15,
+        "defaultValue": 60
+      },
+      {
+        "key": "changeStyle",
+        "type": "enum",
+        "label": "Change on bar",
+        "options": ["percent", "dollars"],
+        "defaultValue": "percent"
+      }
+    ]
+  }
+}

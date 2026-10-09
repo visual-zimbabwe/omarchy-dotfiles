@@ -1,0 +1,180 @@
+{
+  "version": 1,
+  "activeProfile": "default",
+  "bindings": false,
+  "profiles": [
+    {
+      "name": "default",
+      "fallback": "dwindle",
+      "assignments": {
+        "1": "golden",
+        "2": "two-rows-four-columns",
+        "3": "two-rows-four-columns",
+        "4": "two-rows-four-columns"
+      }
+    }
+  ],
+  "layouts": [
+    {
+      "id": "even",
+      "name": "Even",
+      "kind": "ratio",
+      "orientation": "columns",
+      "overflow": "extend",
+      "fill": "largest",
+      "underfill": "rescale",
+      "weights": [
+        50,
+        50
+      ],
+      "gridColumns": 0
+    },
+    {
+      "id": "focus",
+      "name": "Focus",
+      "kind": "ratio",
+      "orientation": "columns",
+      "overflow": "last",
+      "fill": "largest",
+      "underfill": "hold",
+      "weights": [
+        25,
+        50,
+        25
+      ],
+      "gridColumns": 0
+    },
+    {
+      "id": "main",
+      "name": "Main",
+      "kind": "ratio",
+      "orientation": "columns",
+      "overflow": "last",
+      "fill": "largest",
+      "underfill": "rescale",
+      "weights": [
+        60,
+        40
+      ],
+      "gridColumns": 0
+    },
+    {
+      "id": "main-right",
+      "name": "Main right",
+      "kind": "ratio",
+      "orientation": "columns",
+      "overflow": "first",
+      "fill": "largest",
+      "underfill": "rescale",
+      "weights": [
+        40,
+        60
+      ],
+      "gridColumns": 0
+    },
+    {
+      "id": "golden",
+      "name": "Golden",
+      "kind": "ratio",
+      "orientation": "columns",
+      "overflow": "last",
+      "fill": "largest",
+      "underfill": "rescale",
+      "weights": [
+        61.8,
+        38.2
+      ],
+      "gridColumns": 0
+    },
+    {
+      "id": "thirds",
+      "name": "Thirds",
+      "kind": "ratio",
+      "orientation": "columns",
+      "overflow": "extend",
+      "fill": "largest",
+      "underfill": "rescale",
+      "weights": [
+        100
+      ],
+      "gridColumns": 0
+    },
+    {
+      "id": "wide-centre",
+      "name": "Wide centre",
+      "kind": "ratio",
+      "orientation": "columns",
+      "overflow": "last",
+      "fill": "largest",
+      "underfill": "hold",
+      "weights": [
+        20,
+        60,
+        20
+      ],
+      "gridColumns": 0
+    },
+    {
+      "id": "stacked",
+      "name": "Stacked",
+      "kind": "ratio",
+      "orientation": "rows",
+      "overflow": "last",
+      "fill": "largest",
+      "underfill": "rescale",
+      "weights": [
+        50,
+        50
+      ],
+      "gridColumns": 0
+    },
+    {
+      "id": "grid",
+      "name": "Grid",
+      "kind": "grid",
+      "orientation": "columns",
+      "overflow": "extend",
+      "fill": "largest",
+      "underfill": "rescale",
+      "weights": [
+        25,
+        18.75,
+        18.75,
+        37.5
+      ],
+      "gridColumns": 0
+    },
+    {
+      "id": "two-rows-four-columns",
+      "name": "2 Rows 4 Columns",
+      "kind": "grid",
+      "orientation": "columns",
+      "overflow": "extend",
+      "fill": "largest",
+      "underfill": "rescale",
+      "weights": [
+        25,
+        25,
+        25,
+        25
+      ],
+      "gridColumns": 4
+    },
+    {
+      "id": "custom",
+      "name": "Custom",
+      "kind": "ratio",
+      "orientation": "columns",
+      "overflow": "extend",
+      "fill": "largest",
+      "underfill": "rescale",
+      "weights": [
+        33.33,
+        33.33,
+        16.67,
+        16.67
+      ],
+      "gridColumns": 0
+    }
+  ]
+}

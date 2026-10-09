@@ -1,0 +1,424 @@
+import QtQuick
+import qs.Commons
+import qs.Ui
+import "Model.js" as Model
+
+Column {
+    id: listViewRoot
+    property alias field: searchField
+    required property var controller
+    width: parent.width
+    spacing: Style.space(10)
+    visible: controller.view === "list"
+
+    Item {
+        width: parent.width
+        height: searchField.implicitHeight
+
+        TextField {
+            id: searchField
+            anchors.left: parent.left
+            anchors.right: headerActions.left
+            anchors.rightMargin: Style.space(8)
+            placeholderText: "Search tickers…"
+            hasCursor: controller.listChrome === "search" && !activeFocus
+            foreground: controller.contentForeground
+            font.family: controller.contentFontFamily
+
+            onActiveFocusChanged: {
+                if (activeFocus)
+                    controller.searching = true;
+            }
+            onTextChanged: {
+                controller.searchQuery = text;
+                if (controller.searching)
+                    controller.scheduleSearch();
+            }
+
+            Keys.onPressed: function (event) {
+                if (event.key === Qt.Key_Escape) {
+                    controller.clearSearch();
+                    event.accepted = true;
+                } else if (event.key === Qt.Key_Down) {
+                    controller.focusRowsChrome();
+                    event.accepted = true;
+                } else if (event.key === Qt.Key_Right && searchField.cursorPosition >= String(searchField.text).length) {
+                    controller.focusGearChrome();
+                    event.accepted = true;
+                } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                    controller.switchPanel((event.modifiers & Qt.ShiftModifier) || event.key === Qt.Key_Backtab ? -1 : 1);
+                    event.accepted = true;
+                } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    controller.commitSearch();
+                    event.accepted = true;
+                }
+            }
+        }
+
+        Row {
+            id: headerActions
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(4)
+
+            PanelActionButton {
+                id: breadthBtn
+                iconText: "\uf080"
+                tooltipText: "Sector Strat Breadth"
+                foreground: controller.dim
+                fontFamily: controller.contentFontFamily
+                hasCursor: controller.listChrome === "breadth"
+                bordered: controller.listChrome === "breadth"
+                onClicked: controller.openSectorBreadth()
+            }
+
+            PanelActionButton {
+                id: layoutBtn
+                iconText: "\uf009"
+                tooltipText: "Chart Layouts"
+                foreground: controller.dim
+                fontFamily: controller.contentFontFamily
+                hasCursor: controller.listChrome === "layout"
+                bordered: controller.listChrome === "layout"
+                onClicked: controller.openLayouts()
+            }
+
+            PanelActionButton {
+                id: gearBtn
+                iconText: "\uf013"
+                tooltipText: "Settings"
+                foreground: controller.dim
+                fontFamily: controller.contentFontFamily
+                hasCursor: controller.listChrome === "gear"
+                bordered: controller.listChrome === "gear"
+                onClicked: controller.openSettings()
+            }
+        }
+    }
+
+    Text {
+        visible: controller.quoteStatusText !== ""
+        width: parent.width
+        text: controller.quoteStatusText
+        color: controller.quoteError ? controller.contentUrgent : controller.dim
+        font.family: controller.contentFontFamily
+        font.pixelSize: Style.font.bodySmall
+        elide: Text.ElideRight
+    }
+
+    Column {
+        width: parent.width
+        spacing: Style.space(2)
+        visible: controller.searching && controller.searchQuery.length > 0
+
+        Repeater {
+            model: controller.suggestions
+
+            Item {
+                required property int index
+                required property var modelData
+                width: parent.width
+                height: Style.space(44)
+                readonly property bool favorited: Model.isFavorite(controller.watchlist, modelData.symbol)
+
+                CursorSurface {
+                    anchors.fill: parent
+                    foreground: controller.contentForeground
+                    hasCursor: controller.cursorActive && index === controller.suggestionIndex
+
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onEntered: {
+                            controller.cursorActive = true;
+                            controller.suggestionIndex = index;
+                        }
+                        onClicked: controller.openDetail(modelData.symbol)
+                    }
+
+                    Column {
+                        anchors.left: parent.left
+                        anchors.right: starBtn.left
+                        anchors.leftMargin: Style.space(10)
+                        anchors.rightMargin: Style.space(8)
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 1
+
+                        Text {
+                            textFormat: Text.PlainText
+                            text: modelData.symbol
+                            color: controller.contentForeground
+                            font.family: controller.contentFontFamily
+                            font.pixelSize: Style.font.title
+                            font.bold: true
+                        }
+                        Text {
+                            textFormat: Text.PlainText
+                            text: modelData.name + (Model.suggestionMeta(modelData) ? "  " + Model.suggestionMeta(modelData) : "")
+                            color: controller.dim
+                            font.family: controller.contentFontFamily
+                            font.pixelSize: Style.font.bodySmall
+                            elide: Text.ElideRight
+                            width: parent.width
+                        }
+                    }
+
+                    PanelActionButton {
+                        id: starBtn
+                        anchors.right: parent.right
+                        anchors.rightMargin: Style.space(6)
+                        anchors.verticalCenter: parent.verticalCenter
+                        z: 2
+                        iconText: favorited ? "★" : "☆"
+                        tooltipText: favorited ? "Remove from watchlist" : "Add to watchlist"
+                        foreground: favorited ? controller.contentForeground : controller.dim
+                        fontFamily: controller.contentFontFamily
+                        onClicked: controller.toggleFavorite(modelData.symbol)
+                    }
+                }
+            }
+        }
+
+        Text {
+            visible: controller.suggestions.length === 0 && controller.searchQuery.length > 0
+            text: controller.searchRunning ? "Searching…" : (controller.searchError || "No matches")
+            color: controller.searchError ? controller.contentUrgent : controller.dim
+            font.family: controller.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+            leftPadding: Style.space(4)
+        }
+    }
+
+    Column {
+        width: parent.width
+        spacing: 0
+        visible: !(controller.searching && controller.searchQuery.length > 0)
+
+        ListView {
+            id: watchlistRows
+            width: parent.width
+            height: Math.min(controller.watchlist.length, 8) * controller.rowHeight
+            model: controller.watchlist
+            currentIndex: controller.selectedIndex
+            clip: true
+            reuseItems: true
+            cacheBuffer: controller.rowHeight
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
+
+            onCurrentIndexChanged: {
+                if (currentIndex >= 0)
+                    positionViewAtIndex(currentIndex, ListView.Contain);
+            }
+
+            delegate: Item {
+                required property int index
+                required property var modelData
+                width: ListView.view.width
+                height: controller.rowHeight
+
+                readonly property string symbol: String(modelData)
+                readonly property var quote: controller.quotes[symbol] || null
+                readonly property bool selected: controller.cursorActive && index === controller.selectedIndex
+                readonly property bool isPinned: Model.isPinned(controller.pinned, symbol)
+                CursorSurface {
+                    anchors.fill: parent
+                    foreground: controller.contentForeground
+                    hasCursor: selected
+
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        cursorShape: Qt.PointingHandCursor
+                        onEntered: {
+                            controller.cursorActive = true;
+                            controller.selectedIndex = index;
+                        }
+                        onPressed: function (mouse) {
+                            if (mouse.button === Qt.LeftButton)
+                                controller.prefetchDetail(symbol);
+                        }
+                        onClicked: function (mouse) {
+                            if (mouse.button === Qt.RightButton)
+                                controller.pinSymbol(symbol);
+                            else
+                                controller.openDetail(symbol);
+                        }
+                    }
+
+                    Column {
+                        id: nameCol
+                        anchors.left: parent.left
+                        anchors.right: ftfcRow.left
+                        anchors.leftMargin: Style.space(8)
+                        anchors.rightMargin: Style.space(8)
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 1
+
+                        Row {
+                            spacing: Style.space(6)
+                            width: parent.width
+                            Text {
+                                textFormat: Text.PlainText
+                                text: symbol
+                                color: controller.contentForeground
+                                font.family: controller.contentFontFamily
+                                font.pixelSize: Style.font.title
+                                font.bold: true
+                            }
+                            Text {
+                                visible: isPinned
+                                text: "★"
+                                color: controller.dim
+                                font.pixelSize: Style.font.bodySmall
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+                        Text {
+                            textFormat: Text.PlainText
+                            text: quote && quote.name ? quote.name : ""
+                            color: controller.dim
+                            font.family: controller.contentFontFamily
+                            font.pixelSize: Style.font.bodySmall
+                            elide: Text.ElideRight
+                            width: parent.width
+                        }
+                    }
+
+                    Row {
+                        id: ftfcRow
+                        anchors.right: parent.right
+                        anchors.rightMargin: Style.space(8) + Style.space(108) + Style.space(10)
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Style.space(3)
+
+                        Text {
+                            textFormat: Text.PlainText
+                            text: "60"
+                            color: controller.timeframeColor(quote, "60")
+                            font.family: controller.contentFontFamily
+                            font.pixelSize: Style.font.bodySmall
+                            font.letterSpacing: 1
+                            font.bold: true
+                        }
+                        Text {
+                            textFormat: Text.PlainText
+                            text: "|"
+                            color: controller.dim
+                            font.family: controller.contentFontFamily
+                            font.pixelSize: Style.font.bodySmall
+                        }
+                        Text {
+                            textFormat: Text.PlainText
+                            text: "D"
+                            color: controller.timeframeColor(quote, "D")
+                            font.family: controller.contentFontFamily
+                            font.pixelSize: Style.font.bodySmall
+                            font.letterSpacing: 1
+                            font.bold: true
+                        }
+                        Text {
+                            textFormat: Text.PlainText
+                            text: "|"
+                            color: controller.dim
+                            font.family: controller.contentFontFamily
+                            font.pixelSize: Style.font.bodySmall
+                        }
+                        Text {
+                            textFormat: Text.PlainText
+                            text: "W"
+                            color: controller.timeframeColor(quote, "W")
+                            font.family: controller.contentFontFamily
+                            font.pixelSize: Style.font.bodySmall
+                            font.letterSpacing: 1
+                            font.bold: true
+                        }
+                        Text {
+                            textFormat: Text.PlainText
+                            text: "|"
+                            color: controller.dim
+                            font.family: controller.contentFontFamily
+                            font.pixelSize: Style.font.bodySmall
+                        }
+                        Text {
+                            textFormat: Text.PlainText
+                            text: "M"
+                            color: controller.timeframeColor(quote, "M")
+                            font.family: controller.contentFontFamily
+                            font.pixelSize: Style.font.bodySmall
+                            font.letterSpacing: 1
+                            font.bold: true
+                        }
+                    }
+
+                    Column {
+                        id: priceCol
+                        width: Style.space(108)
+                        anchors.right: parent.right
+                        anchors.rightMargin: Style.space(8)
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Style.space(4)
+
+                        Text {
+                            textFormat: Text.PlainText
+                            width: parent.width
+                            horizontalAlignment: Text.AlignRight
+                            elide: Text.ElideRight
+                            text: quote ? Model.formatPrice(quote.price, quote.currency, quote.priceHint) : "-"
+                            color: controller.contentForeground
+                            font.family: controller.contentFontFamily
+                            font.pixelSize: Style.font.body
+                        }
+
+                        Rectangle {
+                            anchors.right: parent.right
+                            radius: Style.space(6)
+                            color: controller.pillFill(quote ? quote.changePercent : null)
+                            implicitWidth: changeLabel.implicitWidth + Style.space(12)
+                            implicitHeight: changeLabel.implicitHeight + Style.space(4)
+
+                            Text {
+                                id: changeLabel
+                                anchors.centerIn: parent
+                                textFormat: Text.PlainText
+                                text: quote ? Model.formatQuoteChange(quote, controller.changeStyle) : "-"
+                                color: controller.contentForeground
+                                font.family: controller.contentFontFamily
+                                font.pixelSize: Style.font.bodySmall
+                                font.bold: true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Column {
+            visible: controller.watchlist.length === 0
+            width: parent.width
+            spacing: Style.space(8)
+            topPadding: Style.space(36)
+
+            Text {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                text: "No favorites yet"
+                color: controller.contentForeground
+                font.family: controller.contentFontFamily
+                font.pixelSize: Style.font.title
+                font.bold: true
+            }
+            Text {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                text: "Search for a ticker, then Favorite it to add it to your watchlist."
+                color: controller.dim
+                font.family: controller.contentFontFamily
+                font.pixelSize: Style.font.body
+            }
+        }
+    }
+}

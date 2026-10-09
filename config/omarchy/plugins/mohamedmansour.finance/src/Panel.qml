@@ -1,0 +1,1948 @@
+import QtQuick
+import Quickshell
+import Quickshell.Io
+import qs.Commons
+import qs.Ui
+import "Model.js" as Model
+
+Panel {
+    id: root
+    moduleName: "mohamedmansour.finance"
+    ipcTarget: "mohamedmansour.finance"
+    manageIpc: false
+
+    property var anchorItem: null
+    property bool openedFromHotkey: false
+    property var hostWidget: null
+    readonly property var barIdentity: hostWidget || root
+
+    property var watchlist: Model.defaultWatchlist()
+    property var pinned: Model.defaultPinned()
+    property int pinIndex: 0
+    property var quotes: ({})
+    property int selectedIndex: 0
+    property bool cursorActive: false
+    property string view: "list"
+    property string detailSymbol: ""
+    property string detailRange: "1D"
+    property var detailQuote: null
+    property string gridMode: "2x2"
+    property var gridSync: ({
+            symbol: true,
+            timeframe: false,
+            crosshair: true,
+            time: true
+        })
+    property var gridSymbols: []
+    property var gridSplits: ({})
+    property var activeGridWindows: []
+    property string breadthWeightMode: "equal"
+    property string breadthSortTimeframe: "1Y"
+    property bool breadthSortAsc: false
+    property var activeBreadthWindow: null
+    property var sectorsHoldings: ({})
+    property var breadthEqualMetrics: []
+    property var breadthCapMetrics: []
+    property double breadthLastFetchedAt: 0
+    property var layouts: ({})
+    property string activeLayoutName: ""
+    property string layoutActionStatus: ""
+    property string discordWebhook: ""
+    property bool gridOpened: false
+    property string chartFetchSymbol: ""
+    property string chartFetchRange: ""
+    property string insightsFetchSymbol: ""
+    property string quotePageFetchSymbol: ""
+    property bool quoteRefreshPending: false
+    property int quoteFailureCount: 0
+    property string quoteError: ""
+    property double quotesUpdatedAt: 0
+    property int chartFailureCount: 0
+    property string chartError: ""
+    property double chartUpdatedAt: 0
+    property int insightsFailureCount: 0
+    property string insightsError: ""
+    property bool insightsLoaded: false
+    property int quotePageFailureCount: 0
+    property string quotePageError: ""
+    property bool quotePageLoaded: false
+    property var detailPage: ({})
+    property var detailInsights: ({})
+    property var detailHoldings: null
+    property var detailHoldingsStratMap: ({})
+    property bool detailHoldingsStratLoading: false
+    property string holdingsFetchSymbol: ""
+    property string holdingsStratFetchSymbol: ""
+    property int holdingsFailureCount: 0
+    property string holdingsError: ""
+    property bool holdingsLoaded: false
+    property var hoveredStratInfo: null
+    property real hoveredStratGlobalX: 0
+    property real hoveredStratGlobalY: 0
+    property var detailHistory: []
+    property var detailCache: ({})
+    property var detailCacheOrder: []
+    readonly property int detailCacheTtlMs: 300000
+    readonly property int detailCacheLimit: 16
+    property string searchQuery: ""
+    property var suggestions: []
+    property int suggestionIndex: 0
+    property string searchPendingQuery: ""
+    property string searchActiveQuery: ""
+    property string searchError: ""
+    property bool searching: false
+    property var searchCache: ({})
+    property var searchCacheOrder: []
+    readonly property int searchCacheTtlMs: 300000
+    readonly property int searchCacheLimit: 32
+    property string listChrome: "rows"
+    property int settingsCursor: 0
+    property int detailSection: 0
+    property int detailActionIndex: 0
+
+    readonly property color contentForeground: bar ? bar.foreground : Color.foreground
+    readonly property color contentUrgent: bar ? bar.urgent : Color.urgent
+    readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
+    readonly property color dim: Qt.darker(contentForeground, 1.45)
+    readonly property color upColor: Qt.rgba(0.22, 0.50, 0.30, 1)
+    readonly property color downColor: Qt.rgba(0.62, 0.22, 0.22, 1)
+    readonly property color upFill: Qt.rgba(upColor.r, upColor.g, upColor.b, 1)
+    readonly property color downFill: Qt.rgba(downColor.r, downColor.g, downColor.b, 1)
+    readonly property int refreshSeconds: Math.max(15, parseInt(setting("refreshSeconds", 60), 10) || 60)
+    readonly property string changeStyle: {
+        var style = String(setting("changeStyle", "percent") || "percent");
+        return style === "dollars" ? style : "percent";
+    }
+    readonly property bool legacyShowOnBar: setting("showOnBar", true) !== false
+    readonly property bool showTicker: setting("showTicker", legacyShowOnBar) !== false
+    readonly property bool showPrice: setting("showPrice", legacyShowOnBar) !== false
+    readonly property bool showChange: setting("showChange", legacyShowOnBar) !== false
+    readonly property bool showLastUpdated: setting("showLastUpdated", false) === true
+    readonly property bool showBarData: showTicker || showPrice || showChange
+    readonly property bool showBarQuote: showPrice || showChange
+    readonly property int changeStyleSettingsIndex: 3
+    readonly property int refreshSettingsIndex: showChange ? 4 : 3
+    readonly property int lastUpdatedSettingsIndex: showChange ? 5 : 4
+    readonly property int barSectionSettingsIndex: showChange ? 6 : 5
+    readonly property int settingsLastIndex: barSectionSettingsIndex
+    readonly property int backgroundRefreshMs: Model.backoffDelay(refreshSeconds * 1000, quoteFailureCount, 3600000)
+    readonly property int liveRefreshMs: Model.backoffDelay(2000, quoteFailureCount, 60000)
+    readonly property int chartRefreshMs: Model.backoffDelay(15000, chartFailureCount, 120000)
+    readonly property int insightsRetryMs: Model.backoffDelay(5000, insightsFailureCount, 120000)
+    readonly property int quotePageRetryMs: Model.backoffDelay(5000, quotePageFailureCount, 120000)
+    readonly property bool searchRunning: searchProc.running
+    readonly property string barSection: {
+        var s = String(setting("barSection", "right") || "right");
+        if (s === "left" || s === "center" || s === "right")
+            return s;
+        return "right";
+    }
+    readonly property string barSymbol: Model.barSymbol(pinned, watchlist, pinIndex)
+    readonly property var quoteSymbols: Model.quoteSymbolsForView(watchlist, detailSymbol, view)
+    readonly property var pinnedQuote: quotes[barSymbol] || null
+    readonly property string label: Model.barLabel(barSymbol, pinnedQuote, false, showTicker, showPrice, showChange, changeStyle)
+    readonly property string verticalLabel: Model.barLabel(barSymbol, pinnedQuote, true, showTicker, showPrice, showChange, changeStyle)
+    readonly property string labelTone: Model.barLabelTone(pinnedQuote, showTicker, showPrice, showChange, changeStyle)
+    readonly property string quoteStatusText: {
+        var hasQuotes = Object.keys(quotes || {}).length > 0;
+        if (quoteProc.running)
+            return hasQuotes ? "" : "Loading quotes…";
+        if (quoteError) {
+            var suffix = showLastUpdated && quotesUpdatedAt > 0 ? " · Last updated " + timeLabel(quotesUpdatedAt) : "";
+            return quoteError + suffix;
+        }
+        return showLastUpdated && quotesUpdatedAt > 0 ? "Updated " + timeLabel(quotesUpdatedAt) : "";
+    }
+    readonly property string chartStatusText: {
+        var currentFetch = chartFetchSymbol === detailSymbol && chartFetchRange === detailRange;
+        if (chartProc.running && currentFetch)
+            return rangeChart ? "" : "Loading chart…";
+        if (chartError)
+            return chartError;
+        return showLastUpdated && chartUpdatedAt > 0 && detailQuote ? "Last updated " + timeLabel(chartUpdatedAt) : "";
+    }
+    readonly property bool detailDataLoading: {
+        var loadingInsights = insightsProc.running && insightsFetchSymbol === detailSymbol && !insightsLoaded;
+        var loadingPage = quotePageProc.running && quotePageFetchSymbol === detailSymbol && !quotePageLoaded;
+        return loadingInsights || loadingPage;
+    }
+    readonly property bool detailDataHasError: insightsError !== "" || quotePageError !== ""
+    readonly property string detailDataStatusText: {
+        var errors = [];
+        if (insightsError)
+            errors.push(insightsError);
+        if (quotePageError)
+            errors.push(quotePageError);
+        return errors.join(" · ");
+    }
+    readonly property var detailRanges: Model.chartRanges()
+    readonly property var activeQuote: quotes[detailSymbol] || detailQuote
+    readonly property var rangeChart: {
+        if (detailQuote && detailQuote.chartRange === detailRange)
+            return detailQuote;
+        return detailQuote || null;
+    }
+    readonly property var detailStats: Model.buildDetailStats(activeQuote, detailPage, detailInsights)
+    readonly property var detailRangeChange: Model.rangeChangePercent(rangeChart, detailRange)
+    readonly property var detailRangeChangeAmount: Model.rangeChangeAmount(rangeChart, detailRange)
+    readonly property var sessionQuote: quotes[detailSymbol] || rangeChart || activeQuote
+    readonly property var detailMainPrice: {
+        if (detailRange === "1D" && sessionQuote && sessionQuote.regularPrice != null)
+            return sessionQuote.regularPrice;
+        return activeQuote ? activeQuote.price : null;
+    }
+    readonly property var detailMainChange: {
+        if (detailRange === "1D" && sessionQuote && sessionQuote.regularChangePercent != null)
+            return sessionQuote.regularChangePercent;
+        return detailRangeChange;
+    }
+    readonly property var detailMainChangeAmount: {
+        if (detailRange === "1D" && sessionQuote && sessionQuote.regularPrice != null && sessionQuote.previousClose != null)
+            return sessionQuote.regularPrice - sessionQuote.previousClose;
+        return detailRangeChangeAmount;
+    }
+    property var heldMainChange: null
+    property var heldMainChangeAmount: null
+    readonly property bool awaitingRangeChart: {
+        if (view !== "detail" || !detailSymbol)
+            return false;
+        if (detailQuote && detailQuote.chartRange === detailRange)
+            return false;
+        return true;
+    }
+    readonly property var shownMainChange: {
+        if (awaitingRangeChart)
+            return heldMainChange;
+        var n = Number(detailMainChange);
+        if (detailMainChange != null && isFinite(n))
+            return detailMainChange;
+        return heldMainChange;
+    }
+    readonly property var shownMainChangeAmount: {
+        if (awaitingRangeChart)
+            return heldMainChangeAmount;
+        var n = Number(detailMainChangeAmount);
+        if (detailMainChangeAmount != null && isFinite(n))
+            return detailMainChangeAmount;
+        return heldMainChangeAmount;
+    }
+    readonly property bool showExtended: detailRange === "1D" && sessionQuote && sessionQuote.hasExtended === true
+    readonly property var extendedChangeAmount: {
+        if (!sessionQuote || sessionQuote.extendedPrice == null || sessionQuote.regularPrice == null)
+            return null;
+        return sessionQuote.extendedPrice - sessionQuote.regularPrice;
+    }
+    readonly property string priceCaption: Model.rangeCaption(detailRange, sessionQuote)
+    readonly property bool detailIsFavorite: Model.isFavorite(watchlist, detailSymbol)
+    readonly property var detailActionIds: {
+        var actions = ["favorite", "pin", "grid"];
+        if (detailIsFavorite)
+            actions.push("remove");
+        return actions;
+    }
+    readonly property int rowHeight: Style.space(56)
+
+    onDetailMainChangeChanged: {
+        if (awaitingRangeChart)
+            return;
+        var n = Number(detailMainChange);
+        if (detailMainChange != null && isFinite(n))
+            heldMainChange = detailMainChange;
+    }
+
+    onDetailMainChangeAmountChanged: {
+        if (awaitingRangeChart)
+            return;
+        var n = Number(detailMainChangeAmount);
+        if (detailMainChangeAmount != null && isFinite(n))
+            heldMainChangeAmount = detailMainChangeAmount;
+    }
+
+    function open() {
+        openedFromHotkey = false;
+        setCenterHoverRevealSuppressed(false);
+        root.view = "list";
+        root.clearSearch();
+        root.detailHistory = [];
+        root.cursorActive = root.watchlist.length > 0;
+        root.selectedIndex = 0;
+        root.controller.show();
+        scheduleOpenRefresh();
+    }
+
+    function openFromHotkey() {
+        openedFromHotkey = true;
+        root.view = "list";
+        root.clearSearch();
+        root.detailHistory = [];
+        root.cursorActive = false;
+        root.controller.show();
+        root.startSearch("");
+        scheduleOpenRefresh();
+        Qt.callLater(function () {
+            if (root.opened)
+                setCenterHoverRevealSuppressed(true);
+        });
+    }
+
+    function close() {
+        setCenterHoverRevealSuppressed(false);
+        openRefreshTimer.stop();
+        root.clearSearch();
+        root.detailHistory = [];
+        root.view = "list";
+        root.controller.hide();
+    }
+
+    function toggle() {
+        if (root.opened)
+            root.close();
+        else
+            root.open();
+    }
+
+    function switchPanel(direction) {
+        if (root.bar && typeof root.bar.switchPanelFrom === "function")
+            return root.bar.switchPanelFrom(root.barIdentity, direction);
+        return false;
+    }
+
+    function setCenterHoverRevealSuppressed(value) {
+        if (root.bar && typeof root.bar.setCenterHoverRevealSuppressed === "function")
+            root.bar.setCenterHoverRevealSuppressed(value);
+        else if (root.bar && "centerHoverRevealSuppressed" in root.bar) {
+            try { root.bar.centerHoverRevealSuppressed = value; } catch (e) {}
+        }
+    }
+
+    function toneColor(pct) {
+        var tone = Model.changeTone(pct);
+        if (tone === "up")
+            return upColor;
+        if (tone === "down")
+            return downColor;
+        return dim;
+    }
+
+    function timeframeColor(quote, tf) {
+        var sym = (quote && quote.symbol) || detailSymbol;
+        var q = (sym && quotes[sym] && quotes[sym].ftfc) ? quotes[sym] : (quote || (detailSymbol ? quotes[detailSymbol] : null));
+        if (!q || !q.ftfc)
+            return dim;
+        var state = q.ftfc[tf];
+        if (state === "up")
+            return upColor;
+        if (state === "down")
+            return downColor;
+        return dim;
+    }
+
+    function pillFill(pct) {
+        var tone = Model.changeTone(pct);
+        if (tone === "up")
+            return upFill;
+        if (tone === "down")
+            return downFill;
+        return Qt.rgba(contentForeground.r, contentForeground.g, contentForeground.b, 0.18);
+    }
+
+    function timeLabel(timestamp) {
+        var date = new Date(Number(timestamp) || 0);
+        var hours = date.getHours();
+        var minutes = date.getMinutes();
+        var seconds = date.getSeconds();
+        function pad(value) {
+            return value < 10 ? "0" + value : String(value);
+        }
+        return pad(hours) + ":" + pad(minutes) + ":" + pad(seconds);
+    }
+
+    function clampSelected() {
+        if (watchlist.length === 0) {
+            selectedIndex = 0;
+            return;
+        }
+        if (selectedIndex < 0)
+            selectedIndex = 0;
+        if (selectedIndex >= watchlist.length)
+            selectedIndex = watchlist.length - 1;
+    }
+
+    function persist() {
+        stateFile.setText(Model.serializeState(watchlist, pinned, detailRange, gridMode, gridSync, gridSymbols, gridSplits, layouts, breadthWeightMode, breadthSortTimeframe, breadthSortAsc, discordWebhook));
+    }
+
+    function persistSettings(values) {
+        var entry = {
+            id: root.moduleName
+        };
+        var existing;
+        for (existing in root.settings)
+            if (existing !== "id")
+                entry[existing] = root.settings[existing];
+        for (existing in values)
+            entry[existing] = values[existing];
+        root.settings = entry;
+        if (root.hostWidget && "settings" in root.hostWidget)
+            root.hostWidget.settings = entry;
+        if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+            root.bar.shell.updateEntryInline(root.moduleName, entry);
+    }
+
+    function setShowTicker(enabled) {
+        persistSettings({
+            showTicker: !!enabled
+        });
+    }
+
+    function setShowPrice(enabled) {
+        persistSettings({
+            showPrice: !!enabled
+        });
+        if (enabled)
+            scheduleBarRefresh();
+    }
+
+    function setShowChange(enabled) {
+        persistSettings({
+            showChange: !!enabled
+        });
+        if (enabled)
+            scheduleBarRefresh();
+    }
+
+    function setShowLastUpdated(enabled) {
+        persistSettings({
+            showLastUpdated: !!enabled
+        });
+    }
+
+    function setRefreshSeconds(value) {
+        var n = Math.max(15, Math.min(3600, parseInt(value, 10) || 60));
+        persistSettings({
+            refreshSeconds: n
+        });
+    }
+
+    function setChangeStyle(style) {
+        var next = String(style || "percent");
+        if (next !== "percent" && next !== "dollars")
+            return;
+        persistSettings({
+            changeStyle: next
+        });
+    }
+
+    function setBarSection(section) {
+        var next = String(section || "right");
+        if (next !== "left" && next !== "center" && next !== "right")
+            return;
+        if (next === root.barSection)
+            return;
+        persistSettings({
+            barSection: next
+        });
+        if (root.bar && root.bar.shell && typeof root.bar.shell.movePluginEntry === "function") {
+            root.bar.shell.movePluginEntry(root.moduleName, next);
+            return;
+        }
+        barMoveProc.command = ["omarchy", "bar", "move", root.moduleName, "--section", next];
+        barMoveProc.running = true;
+    }
+
+    function openSettings() {
+        root.clearSearch();
+        root.settingsCursor = 0;
+        root.view = "settings";
+    }
+
+    function openLayouts() {
+        root.clearSearch();
+        root.layoutActionStatus = "";
+        root.view = "layouts";
+    }
+
+    function applyState(raw) {
+        var state = Model.parseState(raw);
+        var before = (watchlist || []).join("\n");
+        var after = (state.watchlist || []).join("\n");
+        watchlist = state.watchlist;
+        pinned = state.pinned;
+        if (state.detailRange)
+            detailRange = state.detailRange;
+        if (state.gridMode)
+            gridMode = state.gridMode;
+        if (state.gridSync)
+            gridSync = state.gridSync;
+        if (state.gridSymbols)
+            gridSymbols = state.gridSymbols;
+        if (state.gridSplits)
+            gridSplits = state.gridSplits;
+        if (state.layouts)
+            layouts = state.layouts;
+        else
+            layouts = ({});
+        if (state.breadthWeightMode)
+            breadthWeightMode = state.breadthWeightMode;
+        if (state.breadthSortTimeframe)
+            breadthSortTimeframe = state.breadthSortTimeframe;
+        if (state.breadthSortAsc !== undefined)
+            breadthSortAsc = state.breadthSortAsc;
+        if (state.discordWebhook !== undefined)
+            discordWebhook = state.discordWebhook;
+        clampSelected();
+        if (before !== after && (opened || showBarQuote))
+            Qt.callLater(refresh);
+    }
+
+    function refresh() {
+        if (quoteSymbols.length === 0) {
+            quoteRefreshPending = false;
+            return;
+        }
+        if (quoteProc.running) {
+            quoteRefreshPending = true;
+            return;
+        }
+        quoteRefreshPending = false;
+        quoteProc.command = ["curl", "-fsS", "--max-time", "8", "-A", "Mozilla/5.0", Model.sparkUrl(quoteSymbols)];
+        quoteProc.running = true;
+    }
+
+    function scheduleOpenRefresh() {
+        openRefreshTimer.restart();
+    }
+
+    function scheduleBarRefresh() {
+        Qt.callLater(function () {
+            if (root.showBarQuote && !quoteProc.running)
+                root.refresh();
+        });
+    }
+
+    function addSymbol(symbol) {
+        var next = Model.addSymbol(watchlist, symbol);
+        if (next.length === watchlist.length) {
+            var already = Model.normalizeSymbol(symbol);
+            if (already) {
+                selectedIndex = next.indexOf(already);
+                cursorActive = true;
+            }
+            return;
+        }
+        watchlist = next;
+        selectedIndex = next.length - 1;
+        cursorActive = true;
+        persist();
+        refresh();
+    }
+
+    function removeSymbol(symbol) {
+        var next = Model.removeSymbol(watchlist, symbol);
+        watchlist = next;
+        pinned = Model.parsePinned(pinned, next);
+        clampSelected();
+        persist();
+    }
+
+    function pinSymbol(symbol) {
+        var next = Model.normalizeSymbol(symbol);
+        if (!next)
+            return;
+        var list = Model.addSymbol(watchlist, next);
+        watchlist = list;
+        pinned = Model.togglePinned(pinned, list, next);
+        persist();
+        refresh();
+    }
+
+    function toggleFavorite(symbol) {
+        var next = Model.normalizeSymbol(symbol);
+        if (!next)
+            return;
+        if (Model.isFavorite(watchlist, next))
+            removeSymbol(next);
+        else
+            addSymbol(next);
+    }
+
+    function prepareDetail(symbol) {
+        var next = Model.normalizeSymbol(symbol);
+        if (!next)
+            return false;
+        if (detailSymbol === next)
+            return true;
+        detailSymbol = next;
+        heldMainChange = null;
+        detailQuote = null;
+        chartFailureCount = 0;
+        chartError = "";
+        chartUpdatedAt = 0;
+        insightsFailureCount = 0;
+        insightsError = "";
+        insightsLoaded = false;
+        quotePageFailureCount = 0;
+        quotePageError = "";
+        quotePageLoaded = false;
+        holdingsFailureCount = 0;
+        holdingsError = "";
+        holdingsLoaded = false;
+        detailPage = ({});
+        detailInsights = ({});
+        detailHoldings = null;
+        detailHoldingsStratMap = ({});
+        restoreDetailCache(next);
+        fetchDetail();
+        return true;
+    }
+
+    function detailCacheKey(symbol) {
+        return Model.normalizeSymbol(symbol);
+    }
+
+    function cacheDetailData(symbol, field, value) {
+        var key = detailCacheKey(symbol);
+        if (!key)
+            return;
+        var existing = detailCache[key] || {};
+        var entry = {
+            page: existing.page || ({}),
+            pageStoredAt: existing.pageStoredAt || 0,
+            insights: existing.insights || ({}),
+            insightsStoredAt: existing.insightsStoredAt || 0,
+            holdings: existing.holdings || null,
+            holdingsStoredAt: existing.holdingsStoredAt || 0,
+            holdingsStrat: existing.holdingsStrat || ({}),
+            holdingsStratStoredAt: existing.holdingsStratStoredAt || 0
+        };
+        entry[field] = value;
+        entry[field + "StoredAt"] = Date.now();
+
+        var nextCache = {};
+        var nextOrder = [];
+        for (var i = 0; i < detailCacheOrder.length; i++) {
+            var existingKey = detailCacheOrder[i];
+            if (existingKey !== key && detailCache[existingKey]) {
+                nextCache[existingKey] = detailCache[existingKey];
+                nextOrder.push(existingKey);
+            }
+        }
+        nextCache[key] = entry;
+        nextOrder.push(key);
+        while (nextOrder.length > detailCacheLimit)
+            delete nextCache[nextOrder.shift()];
+        detailCache = nextCache;
+        detailCacheOrder = nextOrder;
+    }
+
+    function restoreDetailCache(symbol) {
+        var entry = detailCache[detailCacheKey(symbol)];
+        if (!entry)
+            return;
+        var now = Date.now();
+        if (entry.insightsStoredAt > 0 && now - entry.insightsStoredAt <= detailCacheTtlMs) {
+            detailInsights = entry.insights;
+            insightsLoaded = true;
+        }
+        if (entry.pageStoredAt > 0 && now - entry.pageStoredAt <= detailCacheTtlMs) {
+            detailPage = entry.page;
+            quotePageLoaded = true;
+        }
+        if (entry.holdingsStoredAt > 0 && now - entry.holdingsStoredAt <= detailCacheTtlMs && entry.holdings) {
+            detailHoldings = entry.holdings;
+            holdingsLoaded = true;
+        }
+        if (entry.holdingsStratStoredAt > 0 && now - entry.holdingsStratStoredAt <= detailCacheTtlMs && entry.holdingsStrat) {
+            detailHoldingsStratMap = entry.holdingsStrat;
+        }
+    }
+
+    function prefetchDetail(symbol) {
+        if (!prepareDetail(symbol))
+            return;
+        detailEnrichmentTimer.stop();
+        fetchInsights();
+        fetchQuotePage();
+        fetchHoldings();
+    }
+
+    function openDetail(symbol) {
+        if (!prepareDetail(symbol))
+            return;
+        view = "detail";
+        searching = false;
+        detailSection = 0;
+        detailActionIndex = 0;
+    }
+
+    function openDetailWithHistory(symbol) {
+        var prev = (view === "detail" && detailSymbol) ? detailSymbol : "";
+        var next = Model.normalizeSymbol(symbol);
+        if (prev && next && prev !== next) {
+            var nextHistory = root.detailHistory.slice();
+            nextHistory.push(prev);
+            root.detailHistory = nextHistory;
+        }
+        openDetail(symbol);
+    }
+
+    function closeDetail() {
+        if (root.detailHistory && root.detailHistory.length > 0) {
+            var nextHistory = root.detailHistory.slice();
+            var prevSymbol = nextHistory.pop();
+            root.detailHistory = nextHistory;
+            openDetail(prevSymbol, false);
+            return;
+        }
+        root.detailHistory = [];
+        view = "list";
+        detailSymbol = "";
+        detailQuote = null;
+        detailHoldings = null;
+        Qt.callLater(function () {
+            if (keyCatcher)
+                keyCatcher.forceActiveFocus();
+        });
+    }
+
+    function fetchHoldings() {
+        if (!detailSymbol || !Model.isSpdrSector(detailSymbol)) {
+            detailHoldings = null;
+            detailHoldingsStratMap = ({});
+            holdingsLoaded = false;
+            return;
+        }
+        var entry = detailCache[detailCacheKey(detailSymbol)];
+        var now = Date.now();
+        if (entry && entry.holdingsStoredAt > 0 && now - entry.holdingsStoredAt <= detailCacheTtlMs && entry.holdings) {
+            detailHoldings = entry.holdings;
+            holdingsLoaded = true;
+            fetchHoldingsStrat(detailSymbol);
+            return;
+        }
+        if (holdingsProc.running)
+            return;
+        var hUrl = Model.holdingsUrl(detailSymbol);
+        if (!hUrl)
+            return;
+        holdingsFetchSymbol = detailSymbol;
+        holdingsError = "";
+        holdingsProc.command = ["curl", "-fsS", "--max-time", "12", "-A", "Omafinance research@omafinance.org", hUrl];
+        holdingsProc.running = true;
+    }
+
+    function fetchHoldingsStrat(symbol) {
+        var target = symbol || detailSymbol;
+        if (!target || !Model.isSpdrSector(target)) {
+            detailHoldingsStratMap = ({});
+            detailHoldingsStratLoading = false;
+            return;
+        }
+        var entry = detailCache[detailCacheKey(target)];
+        var now = Date.now();
+        if (entry && entry.holdingsStratStoredAt > 0 && now - entry.holdingsStratStoredAt <= detailCacheTtlMs && entry.holdingsStrat && Object.keys(entry.holdingsStrat).length > 0) {
+            detailHoldingsStratMap = entry.holdingsStrat;
+            detailHoldingsStratLoading = false;
+            return;
+        }
+        if (holdingsStratProc.running)
+            return;
+        root.holdingsStratFetchSymbol = target;
+        root.detailHoldingsStratLoading = true;
+        var home = Quickshell.env("HOME");
+        var scriptPath = home + "/.config/omarchy/plugins/mohamedmansour.finance/scripts/fetch-holdings-strat.js";
+        holdingsStratProc.command = ["node", scriptPath, target];
+        holdingsStratProc.running = true;
+    }
+
+    function setDetailRange(range) {
+        var next = Model.normalizeRange(range);
+        if (detailRange === next)
+            return;
+        detailRange = next;
+        persist();
+        if (!detailSymbol)
+            return;
+        chartFailureCount = 0;
+        chartError = "";
+        chartUpdatedAt = 0;
+        startChartFetch();
+    }
+
+    property bool chartRetryingYahoo: false
+
+    function startChartFetch() {
+        if (!detailSymbol)
+            return;
+        if (chartProc.running)
+            return;
+        chartFetchSymbol = detailSymbol;
+        chartFetchRange = detailRange;
+        chartRetryingYahoo = false;
+        chartError = "";
+        chartProc.command = Model.chartCommand(chartFetchSymbol, chartFetchRange);
+        chartProc.running = true;
+    }
+
+    function fetchDetail() {
+        if (!detailSymbol)
+            return;
+        startChartFetch();
+        detailEnrichmentTimer.restart();
+    }
+
+    function fetchInsights() {
+        if (!detailSymbol)
+            return;
+        if (insightsLoaded)
+            return;
+        if (insightsProc.running)
+            return;
+        insightsFetchSymbol = detailSymbol;
+        insightsError = "";
+        insightsProc.command = ["curl", "-fsS", "--max-time", "8", "-A", "Mozilla/5.0", Model.insightsUrl(insightsFetchSymbol)];
+        insightsProc.running = true;
+    }
+
+    function fetchQuotePage() {
+        if (!detailSymbol)
+            return;
+        if (quotePageLoaded)
+            return;
+        if (quotePageProc.running)
+            return;
+        quotePageFetchSymbol = detailSymbol;
+        quotePageError = "";
+        quotePageProc.command = ["curl", "-fsS", "--compressed", "--max-time", "12", "-A", "Mozilla/5.0", Model.quotePageUrl(quotePageFetchSymbol)];
+        quotePageProc.running = true;
+    }
+
+    function clearSearch() {
+        listChrome = "rows";
+        searching = false;
+        searchQuery = "";
+        suggestions = [];
+        suggestionIndex = 0;
+        searchDebounce.stop();
+        if (listView.field.text !== "")
+            listView.field.text = "";
+        Qt.callLater(function () {
+            if (root.opened && keyCatcher)
+                keyCatcher.forceActiveFocus();
+        });
+    }
+
+    function startSearch(prefix) {
+        listChrome = "search";
+        searching = true;
+        if (prefix) {
+            listView.field.text = prefix;
+            listView.field.cursorPosition = listView.field.text.length;
+        }
+        Qt.callLater(function () {
+            listView.field.forceActiveFocus();
+            if (!prefix)
+                listView.field.selectAll();
+        });
+    }
+
+    function focusSearchChrome() {
+        listChrome = "search";
+        searching = true;
+        Qt.callLater(function () {
+            listView.field.forceActiveFocus();
+            listView.field.cursorPosition = String(listView.field.text).length;
+        });
+    }
+
+    function focusGearChrome() {
+        listChrome = "gear";
+        Qt.callLater(function () {
+            if (keyCatcher)
+                keyCatcher.forceActiveFocus();
+        });
+    }
+
+    function focusRowsChrome() {
+        listChrome = "rows";
+        cursorActive = (searching && suggestions.length > 0) || watchlist.length > 0;
+        Qt.callLater(function () {
+            if (keyCatcher)
+                keyCatcher.forceActiveFocus();
+        });
+    }
+
+    function requestSearch() {
+        var query = listView.field.text.replace(/^\s+|\s+$/g, "");
+        searchQuery = query;
+        if (query.length < 1) {
+            suggestions = [];
+            searchPendingQuery = "";
+            searchError = "";
+            return;
+        }
+        var cached = cachedSearchResults(query);
+        if (cached !== null) {
+            suggestions = cached;
+            suggestionIndex = 0;
+            searchPendingQuery = "";
+            searchError = "";
+            return;
+        }
+        searchError = "";
+        searchPendingQuery = query;
+        if (!searchProc.running)
+            startSearchFetch();
+    }
+
+    function searchCacheKey(query) {
+        return String(query || "").replace(/^\s+|\s+$/g, "").toUpperCase();
+    }
+
+    function cachedSearchResults(query) {
+        var key = searchCacheKey(query);
+        var entry = searchCache[key];
+        if (!entry || Date.now() - entry.storedAt > searchCacheTtlMs)
+            return null;
+        return entry.results;
+    }
+
+    function cacheSearchResults(query, results) {
+        var key = searchCacheKey(query);
+        if (!key)
+            return;
+        var nextCache = {};
+        var nextOrder = [];
+        for (var i = 0; i < searchCacheOrder.length; i++) {
+            var existingKey = searchCacheOrder[i];
+            if (existingKey !== key && searchCache[existingKey]) {
+                nextCache[existingKey] = searchCache[existingKey];
+                nextOrder.push(existingKey);
+            }
+        }
+        nextCache[key] = {
+            storedAt: Date.now(),
+            results: results
+        };
+        nextOrder.push(key);
+        while (nextOrder.length > searchCacheLimit)
+            delete nextCache[nextOrder.shift()];
+        searchCache = nextCache;
+        searchCacheOrder = nextOrder;
+    }
+
+    function startSearchFetch() {
+        if (!searching || !searchPendingQuery)
+            return;
+        searchActiveQuery = searchPendingQuery;
+        searchProc.command = ["curl", "-fsS", "--max-time", "5", "-A", "Mozilla/5.0", Model.searchUrl(searchActiveQuery)];
+        searchProc.running = true;
+    }
+
+    function commitSearch() {
+        if (suggestions.length > 0) {
+            var pick = suggestions[Math.max(0, Math.min(suggestionIndex, suggestions.length - 1))];
+            if (pick)
+                openDetail(pick.symbol);
+            return;
+        }
+        var typed = Model.normalizeSymbol(searchQuery || listView.field.text);
+        if (typed)
+            openDetail(typed);
+    }
+
+    function scheduleSearch() {
+        searchDebounce.restart();
+    }
+
+    function moveCursor(dy) {
+        cursorActive = true;
+        if (searching && suggestions.length > 0) {
+            var next = suggestionIndex + dy;
+            if (next < 0) {
+                focusSearchChrome();
+                return;
+            }
+            if (next >= suggestions.length)
+                next = suggestions.length - 1;
+            suggestionIndex = next;
+            return;
+        }
+        if (watchlist.length === 0) {
+            if (dy < 0)
+                focusSearchChrome();
+            return;
+        }
+        var nextRow = selectedIndex + dy;
+        if (nextRow < 0) {
+            focusSearchChrome();
+            return;
+        }
+        if (nextRow >= watchlist.length)
+            nextRow = watchlist.length - 1;
+        selectedIndex = nextRow;
+    }
+
+    function activateCursor() {
+        if (view === "settings") {
+            if (settingsCursor === 0)
+                setShowTicker(!showTicker);
+            else if (settingsCursor === 1)
+                setShowPrice(!showPrice);
+            else if (settingsCursor === 2)
+                setShowChange(!showChange);
+            else if (settingsCursor === lastUpdatedSettingsIndex)
+                setShowLastUpdated(!showLastUpdated);
+            return;
+        }
+        if (view === "detail") {
+            if (detailSection !== 0)
+                return;
+            var action = detailActionIds[detailActionIndex];
+            if (action === "favorite")
+                toggleFavorite(detailSymbol);
+            else if (action === "pin")
+                pinSymbol(detailSymbol);
+            else if (action === "grid")
+                openGrid(detailSymbol);
+            else if (action === "remove") {
+                removeSymbol(detailSymbol);
+                closeDetail();
+            }
+            return;
+        }
+        if (listChrome === "gear") {
+            openSettings();
+            return;
+        }
+        if (listChrome === "search") {
+            commitSearch();
+            return;
+        }
+        if (searching && searchQuery.length > 0 && suggestions.length > 0) {
+            var pick = suggestions[Math.max(0, Math.min(suggestionIndex, suggestions.length - 1))];
+            if (pick)
+                openDetail(pick.symbol);
+            return;
+        }
+        if (watchlist.length === 0)
+            return;
+        openDetail(watchlist[selectedIndex]);
+    }
+
+    function moveFocus(dx, dy) {
+        if (view === "settings") {
+            if (dy !== 0)
+                settingsCursor = Math.max(0, Math.min(settingsLastIndex, settingsCursor + dy));
+            if (dx !== 0) {
+                if (settingsCursor === 0)
+                    setShowTicker(dx > 0);
+                else if (settingsCursor === 1)
+                    setShowPrice(dx > 0);
+                else if (settingsCursor === 2)
+                    setShowChange(dx > 0);
+                else if (showChange && settingsCursor === changeStyleSettingsIndex)
+                    setChangeStyle(dx > 0 ? "dollars" : "percent");
+                else if (settingsCursor === refreshSettingsIndex)
+                    setRefreshSeconds(refreshSeconds + dx * 15);
+                else if (settingsCursor === lastUpdatedSettingsIndex)
+                    setShowLastUpdated(dx > 0);
+                else if (settingsCursor === barSectionSettingsIndex) {
+                    var sections = ["left", "center", "right"];
+                    var i = sections.indexOf(barSection);
+                    if (i < 0)
+                        i = 2;
+                    i = Math.max(0, Math.min(2, i + dx));
+                    setBarSection(sections[i]);
+                }
+            }
+            return;
+        }
+        if (view === "detail") {
+            if (dy !== 0) {
+                detailSection = Math.max(0, Math.min(1, detailSection + dy));
+                return;
+            }
+            if (dx === 0)
+                return;
+            if (detailSection === 0) {
+                var n = detailActionIds.length;
+                if (n > 0)
+                    detailActionIndex = (detailActionIndex + dx + n) % n;
+                return;
+            }
+            var ranges = detailRanges;
+            var idx = ranges.indexOf(detailRange);
+            if (idx < 0)
+                idx = 0;
+            idx = (idx + dx + ranges.length) % ranges.length;
+            setDetailRange(ranges[idx]);
+            return;
+        }
+        if (listChrome === "gear") {
+            if (dx < 0)
+                focusSearchChrome();
+            else if (dy > 0)
+                focusRowsChrome();
+            return;
+        }
+        if (dx !== 0)
+            return;
+        if (dy !== 0)
+            moveCursor(dy);
+    }
+
+    FileView {
+        id: stateFile
+        path: Quickshell.env("HOME") + "/.local/state/omarchy/settings/finance.json"
+        watchChanges: true
+        atomicWrites: true
+        printErrors: false
+        onLoaded: root.applyState(text())
+        onLoadFailed: {
+            root.applyState("");
+            if (mkdirProc.running)
+                root.seedOnReady = true;
+            else
+                root.persist();
+        }
+        onFileChanged: reload()
+    }
+
+    property bool seedOnReady: false
+
+    Process {
+        id: mkdirProc
+        command: ["mkdir", "-p", Quickshell.env("HOME") + "/.local/state/omarchy/settings"]
+        onExited: {
+            if (root.seedOnReady) {
+                root.seedOnReady = false;
+                root.persist();
+            }
+        }
+    }
+
+    Component.onCompleted: mkdirProc.running = true
+
+    Process {
+        id: barMoveProc
+    }
+
+    Process {
+        id: quoteProc
+        onExited: function (exitCode) {
+            var raw = String(quoteStdout.text || "").trim();
+            var parsed = exitCode === 0 && raw ? Model.parseSpark(raw) : ({});
+            if (Object.keys(parsed).length > 0) {
+                root.quotes = Model.mergeQuotes(root.quotes, parsed);
+                root.quoteFailureCount = 0;
+                root.quoteError = "";
+                root.quotesUpdatedAt = Date.now();
+            } else {
+                root.quoteFailureCount = Math.min(10, root.quoteFailureCount + 1);
+                root.quoteError = "Quotes unavailable";
+            }
+            if (root.quoteRefreshPending)
+                Qt.callLater(root.refresh);
+        }
+        stdout: StdioCollector {
+            id: quoteStdout
+            waitForEnd: true
+        }
+    }
+
+    Process {
+        id: searchProc
+        onExited: function (exitCode) {
+            var results = [];
+            if (exitCode === 0) {
+                results = Model.parseSearch(searchStdout.text);
+                root.cacheSearchResults(root.searchActiveQuery, results);
+            }
+            if (root.searching && root.searchActiveQuery === root.searchQuery) {
+                if (exitCode === 0) {
+                    root.suggestions = results;
+                    root.searchError = "";
+                } else {
+                    root.suggestions = [];
+                    root.searchError = "Search unavailable";
+                }
+                root.suggestionIndex = 0;
+            }
+            if (root.searching && root.searchPendingQuery && root.searchPendingQuery !== root.searchActiveQuery)
+                Qt.callLater(root.startSearchFetch);
+        }
+        stdout: StdioCollector {
+            id: searchStdout
+            waitForEnd: true
+        }
+    }
+
+    Process {
+        id: chartProc
+        onExited: function (exitCode) {
+            var currentFetch = root.chartFetchSymbol === root.detailSymbol && root.chartFetchRange === root.detailRange;
+            if (currentFetch) {
+                var parsed = exitCode === 0 ? Model.parseChart(chartStdout.text, root.chartFetchRange, root.chartFetchSymbol || root.detailSymbol) : null;
+                if (!parsed && !root.chartRetryingYahoo && Model.isCryptoSymbol(root.chartFetchSymbol)) {
+                    root.chartRetryingYahoo = true;
+                    chartProc.command = ["curl", "-fsS", "--max-time", "8", "-A", "Mozilla/5.0", Model.yahooChartUrl(root.chartFetchSymbol, root.chartFetchRange)];
+                    chartProc.running = true;
+                    return;
+                }
+                root.chartRetryingYahoo = false;
+                var expected = Model.chartSpec(root.detailRange).range;
+                var valid = parsed && parsed.symbol === root.detailSymbol && (!parsed.yahooRange || parsed.yahooRange === expected);
+                if (valid) {
+                    parsed.chartRange = root.detailRange;
+                    if (root.quotes[root.detailSymbol] && root.quotes[root.detailSymbol].ftfc)
+                        parsed.ftfc = root.quotes[root.detailSymbol].ftfc;
+                    root.detailQuote = parsed;
+                    root.chartFailureCount = 0;
+                    root.chartError = "";
+                    root.chartUpdatedAt = Date.now();
+                } else {
+                    root.chartFailureCount = Math.min(10, root.chartFailureCount + 1);
+                    root.chartError = "Chart unavailable";
+                }
+            }
+            if (root.detailSymbol && (root.chartFetchSymbol !== root.detailSymbol || root.chartFetchRange !== root.detailRange))
+                Qt.callLater(root.startChartFetch);
+        }
+        stdout: StdioCollector {
+            id: chartStdout
+            waitForEnd: true
+        }
+    }
+
+    Process {
+        id: insightsProc
+        onExited: function (exitCode) {
+            var currentFetch = root.insightsFetchSymbol === root.detailSymbol;
+            if (currentFetch) {
+                var raw = String(insightsStdout.text || "").trim();
+                if (exitCode === 0 && Model.isInsightsResponse(raw)) {
+                    root.detailInsights = Model.parseInsights(raw);
+                    root.cacheDetailData(root.insightsFetchSymbol, "insights", root.detailInsights);
+                    root.insightsFailureCount = 0;
+                    root.insightsError = "";
+                    root.insightsLoaded = true;
+                } else {
+                    root.insightsFailureCount = Math.min(10, root.insightsFailureCount + 1);
+                    root.insightsError = "Insights unavailable";
+                }
+            }
+            if (root.detailSymbol && root.insightsFetchSymbol !== root.detailSymbol)
+                Qt.callLater(root.fetchInsights);
+        }
+        stdout: StdioCollector {
+            id: insightsStdout
+            waitForEnd: true
+        }
+    }
+
+    Process {
+        id: quotePageProc
+        onExited: function (exitCode) {
+            var currentFetch = root.quotePageFetchSymbol === root.detailSymbol;
+            if (currentFetch) {
+                var raw = String(quotePageStdout.text || "").trim();
+                if (exitCode === 0 && raw) {
+                    root.detailPage = Model.parseQuotePage(raw);
+                    root.cacheDetailData(root.quotePageFetchSymbol, "page", root.detailPage);
+                    root.quotePageFailureCount = 0;
+                    root.quotePageError = "";
+                    root.quotePageLoaded = true;
+                } else {
+                    root.quotePageFailureCount = Math.min(10, root.quotePageFailureCount + 1);
+                    root.quotePageError = "Fundamentals unavailable";
+                }
+            }
+            if (root.detailSymbol && root.quotePageFetchSymbol !== root.detailSymbol)
+                Qt.callLater(root.fetchQuotePage);
+        }
+        stdout: StdioCollector {
+            id: quotePageStdout
+            waitForEnd: true
+        }
+    }
+
+    Process {
+        id: holdingsProc
+        onExited: function (exitCode) {
+            var currentFetch = root.holdingsFetchSymbol === root.detailSymbol;
+            if (currentFetch) {
+                var raw = String(holdingsStdout.text || "").trim();
+                if (exitCode === 0 && raw) {
+                    var parsed = Model.parseNportXml(raw, root.holdingsFetchSymbol);
+                    if (parsed && parsed.holdings && parsed.holdings.length > 0) {
+                        root.detailHoldings = parsed;
+                        root.cacheDetailData(root.holdingsFetchSymbol, "holdings", parsed);
+                        root.holdingsFailureCount = 0;
+                        root.holdingsError = "";
+                        root.holdingsLoaded = true;
+                        root.fetchHoldingsStrat(root.holdingsFetchSymbol);
+                    } else {
+                        root.detailHoldings = null;
+                        root.holdingsLoaded = false;
+                    }
+                } else {
+                    root.detailHoldings = null;
+                    root.holdingsLoaded = false;
+                }
+            }
+            if (root.detailSymbol && Model.isSpdrSector(root.detailSymbol) && root.holdingsFetchSymbol !== root.detailSymbol)
+                Qt.callLater(root.fetchHoldings);
+        }
+        stdout: StdioCollector {
+            id: holdingsStdout
+            waitForEnd: true
+        }
+    }
+
+    Process {
+        id: holdingsStratProc
+        onExited: function (exitCode) {
+            var currentFetch = root.holdingsStratFetchSymbol === root.detailSymbol;
+            if (currentFetch) {
+                var raw = String(holdingsStratStdout.text || "").trim();
+                if (exitCode === 0 && raw) {
+                    try {
+                        var parsed = JSON.parse(raw);
+                        if (parsed && parsed.stratMap) {
+                            root.detailHoldingsStratMap = parsed.stratMap;
+                            root.cacheDetailData(root.holdingsStratFetchSymbol, "holdingsStrat", parsed.stratMap);
+                        }
+                    } catch (e) {
+                        console.log("[HoldingsStrat] parse error:", e);
+                    }
+                }
+                root.detailHoldingsStratLoading = false;
+            }
+            if (root.detailSymbol && Model.isSpdrSector(root.detailSymbol) && root.holdingsStratFetchSymbol !== root.detailSymbol)
+                Qt.callLater(function () { root.fetchHoldingsStrat(root.detailSymbol); });
+        }
+        stdout: StdioCollector {
+            id: holdingsStratStdout
+            waitForEnd: true
+        }
+    }
+
+    Timer {
+        id: searchDebounce
+        interval: 100
+        onTriggered: root.requestSearch()
+    }
+
+    Timer {
+        id: detailEnrichmentTimer
+        interval: 16
+        repeat: false
+        onTriggered: {
+            root.fetchInsights();
+            root.fetchQuotePage();
+            root.fetchHoldings();
+        }
+    }
+
+    Timer {
+        id: openRefreshTimer
+        interval: 250
+        repeat: false
+        onTriggered: {
+            var searchStarted = root.searching && root.searchQuery.length > 0;
+            if (root.opened && !searchStarted && !quoteProc.running)
+                root.refresh();
+        }
+    }
+
+    Timer {
+        id: refreshTimer
+        interval: root.backgroundRefreshMs
+        running: root.showBarQuote && !root.opened
+        repeat: true
+        onTriggered: if (!quoteProc.running)
+            root.refresh()
+    }
+
+    Timer {
+        id: liveTimer
+        interval: root.liveRefreshMs
+        running: root.opened
+        repeat: true
+        onTriggered: if (!quoteProc.running)
+            root.refresh()
+    }
+
+    Timer {
+        id: chartLiveTimer
+        interval: root.chartRefreshMs
+        running: root.opened && root.view === "detail" && root.detailRange === "1D"
+        repeat: true
+        onTriggered: root.startChartFetch()
+    }
+
+    Timer {
+        interval: root.insightsRetryMs
+        running: root.opened && root.view === "detail" && root.insightsError !== ""
+        repeat: false
+        onTriggered: root.fetchInsights()
+    }
+
+    Timer {
+        interval: root.quotePageRetryMs
+        running: root.opened && root.view === "detail" && root.quotePageError !== ""
+        repeat: false
+        onTriggered: root.fetchQuotePage()
+    }
+
+    Timer {
+        id: pinRotateTimer
+        interval: 5000
+        running: root.showBarData && (root.pinned || []).length > 1
+        repeat: true
+        onTriggered: root.pinIndex = root.pinIndex + 1
+    }
+
+    IpcHandler {
+        target: root.ipcTarget
+
+        function open(): void {
+            root.openFromHotkey();
+        }
+        function openBreadth(): void {
+            root.openSectorBreadth();
+        }
+        function close(): void {
+            root.close();
+        }
+        function show(): void {
+            root.openFromHotkey();
+        }
+        function hide(): void {
+            root.close();
+        }
+        function toggle(): void {
+            root.toggle();
+        }
+        function refresh(): void {
+            root.refresh();
+        }
+    }
+
+    KeyboardPanel {
+        id: panel
+        anchorItem: root.anchorItem
+        owner: root.barIdentity
+        bar: root.bar
+        open: root.opened
+        centerOnBar: false
+        focusTarget: keyCatcher
+        contentWidth: panel.fittedContentWidth(Style.space(520))
+        contentHeight: panel.fittedContentHeight(bodyColumn.implicitHeight, Style.space(620))
+
+        PanelKeyCatcher {
+            id: keyCatcher
+            anchors.fill: parent
+            blocked: listView.field.activeFocus
+            onMoveRequested: function (dx, dy) {
+                root.moveFocus(dx, dy);
+            }
+            onActivateRequested: root.activateCursor()
+            onCloseRequested: {
+                if (root.view === "detail")
+                    root.closeDetail();
+                else if (root.view === "settings")
+                    root.view = "list";
+                else if (root.listChrome === "gear")
+                    root.focusSearchChrome();
+                else if (root.searching)
+                    root.clearSearch();
+                else
+                    root.close();
+            }
+            onDeleteRequested: {
+                if (root.view !== "list" || root.searching || root.watchlist.length === 0)
+                    return;
+                root.removeSymbol(root.watchlist[root.selectedIndex]);
+            }
+            Keys.onPressed: function (event) {
+                if (event.key === Qt.Key_R && (event.modifiers & Qt.AltModifier)) {
+                    if (root.view === "detail" && detailView && detailView.resetChart) {
+                        detailView.resetChart();
+                        event.accepted = true;
+                    }
+                }
+            }
+            onTabRequested: function (direction) {
+                root.switchPanel(direction);
+            }
+            onTextKey: function (t) {
+                if (root.view === "settings")
+                    return;
+                if (root.view === "detail") {
+                    if (t === "r" || t === "R") {
+                        if (detailView && detailView.resetChart)
+                            detailView.resetChart();
+                        return;
+                    }
+                    if (t === "f" || t === "F")
+                        root.toggleFavorite(root.detailSymbol);
+                    else if (t === "p" || t === "P")
+                        root.pinSymbol(root.detailSymbol);
+                    else if ((t === "x" || t === "X") && root.detailIsFavorite) {
+                        root.removeSymbol(root.detailSymbol);
+                        root.closeDetail();
+                    }
+                    return;
+                }
+                if (t === "/" || t === "?") {
+                    root.startSearch("");
+                    return;
+                }
+                if (t === "s" || t === "S") {
+                    root.openSettings();
+                    return;
+                }
+                if (t === "p" || t === "P") {
+                    if (root.searching && root.suggestions.length > 0)
+                        root.toggleFavorite(root.suggestions[root.suggestionIndex].symbol);
+                    else if (root.watchlist.length > 0)
+                        root.pinSymbol(root.watchlist[root.selectedIndex]);
+                    return;
+                }
+                if (t === "f" || t === "F") {
+                    if (root.searching && root.suggestions.length > 0)
+                        root.toggleFavorite(root.suggestions[root.suggestionIndex].symbol);
+                    else if (root.watchlist.length > 0)
+                        root.toggleFavorite(root.watchlist[root.selectedIndex]);
+                    return;
+                }
+                if (t === "x" || t === "X")
+                    return;
+                if (root.listChrome === "gear")
+                    return;
+                if (t && t.length === 1 && t !== " ")
+                    root.startSearch(t);
+            }
+
+            Flickable {
+                id: bodyScroll
+                anchors.fill: parent
+                contentWidth: width
+                contentHeight: bodyColumn.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                interactive: contentHeight > height
+
+                Column {
+                    id: bodyColumn
+                    width: bodyScroll.width
+                    spacing: Style.space(10)
+
+                    FinanceListView {
+                        id: listView
+                        width: parent.width
+                        controller: root
+                        visible: root.view === "list"
+                    }
+
+                    FinanceSettingsView {
+                        width: parent.width
+                        controller: root
+                        visible: root.view === "settings"
+                    }
+
+                    FinanceLayoutsView {
+                        width: parent.width
+                        controller: root
+                        visible: root.view === "layouts"
+                    }
+
+                    FinanceDetailView {
+                        id: detailView
+                        width: parent.width
+                        controller: root
+                        visible: root.view === "detail"
+                    }
+                }
+            }
+
+            Item {
+                id: stratTooltipOverlay
+                anchors.fill: parent
+                z: 9999
+                visible: root.hoveredStratInfo !== null
+
+                Rectangle {
+                    id: stratTooltipBox
+                    visible: root.hoveredStratInfo !== null
+                    width: tooltipCol.implicitWidth + Style.space(20)
+                    height: tooltipCol.implicitHeight + Style.space(16)
+                    radius: Style.space(6)
+                    color: Qt.rgba(0.06, 0.06, 0.08, 0.96)
+                    border.color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.25)
+                    border.width: 1
+
+                    x: Math.max(Style.space(8), Math.min(parent.width - width - Style.space(8), root.hoveredStratGlobalX - width / 2))
+                    y: root.hoveredStratGlobalY - height - Style.space(10) > Style.space(8) ? (root.hoveredStratGlobalY - height - Style.space(10)) : (root.hoveredStratGlobalY + Style.space(24))
+
+                    Column {
+                        id: tooltipCol
+                        anchors.centerIn: parent
+                        spacing: Style.space(3)
+
+                        Row {
+                            spacing: Style.space(6)
+                            Text {
+                                text: root.hoveredStratInfo ? (root.hoveredStratInfo.symbol + " · " + (root.hoveredStratInfo.timeframe === "60" ? "60 Min" : root.hoveredStratInfo.timeframe === "D" ? "Daily" : root.hoveredStratInfo.timeframe === "W" ? "Weekly" : root.hoveredStratInfo.timeframe === "M" ? "Monthly" : "Yearly")) : ""
+                                color: root.contentForeground
+                                font.family: root.contentFontFamily
+                                font.pixelSize: Style.font.bodySmall
+                                font.bold: true
+                            }
+                            Text {
+                                text: root.hoveredStratInfo && root.hoveredStratInfo.data && root.hoveredStratInfo.data.bar ? root.hoveredStratInfo.data.bar : ""
+                                color: root.hoveredStratInfo && root.hoveredStratInfo.data && root.hoveredStratInfo.data.polarity === "green" ? root.upColor : (root.hoveredStratInfo && root.hoveredStratInfo.data && root.hoveredStratInfo.data.polarity === "red" ? root.downColor : root.dim)
+                                font.family: root.contentFontFamily
+                                font.pixelSize: Style.font.bodySmall
+                                font.bold: true
+                            }
+                        }
+
+                        Text {
+                            visible: root.hoveredStratInfo && root.hoveredStratInfo.data && root.hoveredStratInfo.data.sequence && root.hoveredStratInfo.data.sequence !== "-"
+                            text: visible ? ("3-Bar Sequence: " + root.hoveredStratInfo.data.sequence) : ""
+                            color: root.contentForeground
+                            font.family: root.contentFontFamily
+                            font.pixelSize: Style.font.bodySmall - 1
+                        }
+
+                        Text {
+                            visible: root.hoveredStratInfo && root.hoveredStratInfo.data && root.hoveredStratInfo.data.inForce && root.hoveredStratInfo.data.inForce !== "-"
+                            text: visible ? ("Status: " + root.hoveredStratInfo.data.inForce) : ""
+                            color: visible && root.hoveredStratInfo.data.inForce.indexOf("In-Force") !== -1 ? root.upColor : root.dim
+                            font.family: root.contentFontFamily
+                            font.pixelSize: Style.font.bodySmall - 1
+                        }
+
+                        Row {
+                            visible: root.hoveredStratInfo && root.hoveredStratInfo.data && (root.hoveredStratInfo.data.triggerHigh !== null || root.hoveredStratInfo.data.triggerLow !== null)
+                            spacing: Style.space(8)
+                            Text {
+                                text: (root.hoveredStratInfo && root.hoveredStratInfo.data && root.hoveredStratInfo.data.triggerHigh !== null) ? ("Trig H: " + Model.formatPrice(root.hoveredStratInfo.data.triggerHigh, "USD", 2)) : ""
+                                color: root.dim
+                                font.family: root.contentFontFamily
+                                font.pixelSize: Style.font.bodySmall - 1
+                            }
+                            Text {
+                                text: (root.hoveredStratInfo && root.hoveredStratInfo.data && root.hoveredStratInfo.data.triggerLow !== null) ? ("Trig L: " + Model.formatPrice(root.hoveredStratInfo.data.triggerLow, "USD", 2)) : ""
+                                color: root.dim
+                                font.family: root.contentFontFamily
+                                font.pixelSize: Style.font.bodySmall - 1
+                            }
+                        }
+
+                        Text {
+                            visible: root.hoveredStratInfo && root.hoveredStratInfo.data && root.hoveredStratInfo.data.open !== null
+                            text: visible ? ("O: " + Model.formatPrice(root.hoveredStratInfo.data.open, "USD", 2) + "  H: " + Model.formatPrice(root.hoveredStratInfo.data.high, "USD", 2) + "  L: " + Model.formatPrice(root.hoveredStratInfo.data.low, "USD", 2) + "  C: " + Model.formatPrice(root.hoveredStratInfo.data.close, "USD", 2)) : ""
+                            color: root.dim
+                            font.family: root.contentFontFamily
+                            font.pixelSize: Style.font.bodySmall - 2
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    function closeAllGrids() {
+        var list = root.activeGridWindows ? root.activeGridWindows.slice() : [];
+        root.activeGridWindows = [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i]) {
+                list[i].visible = false;
+                if (typeof list[i].destroy === "function")
+                    list[i].destroy();
+            }
+        }
+    }
+
+    Timer {
+        id: layoutSpawnTimer
+        interval: 150
+        repeat: true
+        property var pendingSymbols: []
+        property int currentIndex: 0
+        onTriggered: {
+            if (currentIndex < pendingSymbols.length) {
+                root.openGrid(pendingSymbols[currentIndex]);
+                currentIndex++;
+            } else {
+                running = false;
+                pendingSymbols = [];
+                currentIndex = 0;
+            }
+        }
+    }
+
+    Process {
+        id: hyprctlWorkspaceProc
+    }
+
+    Process {
+        id: hyprctlClientsProc
+        command: ["hyprctl", "clients", "-j"]
+        property string pendingSaveName: ""
+        onExited: function (exitCode) {
+            var raw = String(hyprctlClientsStdout.text || "").trim();
+            var parsed = [];
+            try {
+                if (exitCode === 0 && raw) {
+                    var clients = JSON.parse(raw);
+                    if (Array.isArray(clients)) {
+                        for (var i = 0; i < clients.length; i++) {
+                            var c = clients[i];
+                            var title = String(c.title || c.initialTitle || "");
+                            if (title.indexOf("Omafinance Grid - ") === 0) {
+                                var sym = title.substring("Omafinance Grid - ".length).trim();
+                                if (sym) {
+                                    var ws = (c.workspace && c.workspace.id !== undefined) ? c.workspace.id : 2;
+                                    var at = (Array.isArray(c.at) && c.at.length === 2) ? c.at : [0, 0];
+                                    parsed.push({
+                                        symbol: sym,
+                                        workspace: ws,
+                                        x: at[0],
+                                        y: at[1]
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+            }
+
+            parsed.sort(function (a, b) {
+                if (Math.abs(a.y - b.y) > 50)
+                    return a.y - b.y;
+                return a.x - b.x;
+            });
+
+            var windowsList = [];
+            var targetWs = 2;
+            if (parsed.length > 0) {
+                targetWs = parsed[0].workspace;
+                for (var j = 0; j < parsed.length; j++) {
+                    windowsList.push({
+                        symbol: parsed[j].symbol,
+                        workspace: parsed[j].workspace
+                    });
+                }
+            } else if (root.activeGridWindows && root.activeGridWindows.length > 0) {
+                for (var k = 0; k < root.activeGridWindows.length; k++) {
+                    var w = root.activeGridWindows[k];
+                    if (w && w.visible && w.mainSymbol) {
+                        windowsList.push({
+                            symbol: w.mainSymbol,
+                            workspace: targetWs
+                        });
+                    }
+                }
+            }
+
+            if (windowsList.length > 0 && pendingSaveName) {
+                root.layouts = Model.saveLayout(root.layouts, pendingSaveName, windowsList, targetWs);
+                root.activeLayoutName = pendingSaveName;
+                root.persist();
+                root.updateActiveGridsLayouts();
+                root.layoutActionStatus = "Layout '" + pendingSaveName + "' saved (" + windowsList.length + " charts).";
+            } else {
+                root.layoutActionStatus = "No active chart grids found to save.";
+            }
+            pendingSaveName = "";
+        }
+        stdout: StdioCollector {
+            id: hyprctlClientsStdout
+            waitForEnd: true
+        }
+    }
+
+    function snapshotCurrentLayout(name) {
+        var trimmed = String(name || "").trim();
+        if (!trimmed)
+            return;
+        hyprctlClientsProc.pendingSaveName = trimmed;
+        if (!hyprctlClientsProc.running)
+            hyprctlClientsProc.running = true;
+    }
+
+    function loadLayout(name) {
+        if (!root.layouts || !root.layouts[name])
+            return;
+        var layout = root.layouts[name];
+        var windows = layout.windows || [];
+        if (windows.length === 0)
+            return;
+
+        root.activeLayoutName = name;
+        root.closeAllGrids();
+
+        var ws = layout.workspace || 2;
+        hyprctlWorkspaceProc.command = ["hyprctl", "dispatch", "workspace", String(ws)];
+        hyprctlWorkspaceProc.running = true;
+
+        var syms = [];
+        for (var i = 0; i < windows.length; i++) {
+            var sym = typeof windows[i] === "string" ? windows[i] : (windows[i] ? windows[i].symbol : "");
+            if (sym)
+                syms.push(sym);
+        }
+
+        layoutSpawnTimer.stop();
+        layoutSpawnTimer.pendingSymbols = syms;
+        layoutSpawnTimer.currentIndex = 0;
+        layoutSpawnTimer.restart();
+    }
+
+    function deleteLayout(name) {
+        root.layouts = Model.deleteLayout(root.layouts, name);
+        if (root.activeLayoutName === name)
+            root.activeLayoutName = "";
+        root.persist();
+        root.updateActiveGridsLayouts();
+    }
+
+    function updateActiveGridsLayouts() {
+        if (root.activeGridWindows) {
+            for (var i = 0; i < root.activeGridWindows.length; i++) {
+                var w = root.activeGridWindows[i];
+                if (w && w.visible) {
+                    w.layouts = root.layouts;
+                    w.activeLayoutName = root.activeLayoutName;
+                }
+            }
+        }
+    }
+
+    function openGrid(symbol) {
+        var sym = symbol || detailSymbol || (watchlist.length > 0 ? watchlist[0] : "AAPL");
+        for (var i = 0; i < root.activeGridWindows.length; i++) {
+            var existing = root.activeGridWindows[i];
+            if (existing && existing.visible && existing.mainSymbol === sym) {
+                if (typeof existing.raise === "function")
+                    existing.raise();
+                if (typeof existing.requestActivate === "function")
+                    existing.requestActivate();
+                return;
+            }
+        }
+
+        var nextWindows = [];
+        for (var j = 0; j < root.activeGridWindows.length; j++) {
+            if (root.activeGridWindows[j] && root.activeGridWindows[j].visible)
+                nextWindows.push(root.activeGridWindows[j]);
+        }
+
+        var currentSplits = root.gridSplits || ({});
+        var currentMode = root.gridMode || "2x2";
+        var win = gridWindowComponent.createObject(root, {
+            mainSymbol: sym,
+            watchlist: root.watchlist,
+            pinned: root.pinned,
+            gridMode: currentMode,
+            syncSymbol: root.gridSync ? root.gridSync.symbol !== false : true,
+            syncTimeframe: root.gridSync ? root.gridSync.timeframe === true : false,
+            syncCrosshair: root.gridSync ? root.gridSync.crosshair !== false : true,
+            syncTime: root.gridSync ? root.gridSync.time !== false : true,
+            cellSymbols: [sym, sym, sym, sym, sym],
+            rowSplitRatio: currentSplits[currentMode] && currentSplits[currentMode].rowRatio ? currentSplits[currentMode].rowRatio : 0.5,
+            topColSplitRatio: currentSplits[currentMode] && currentSplits[currentMode].colTopRatio ? currentSplits[currentMode].colTopRatio : 0.5,
+            botColSplitRatio: currentSplits[currentMode] && currentSplits[currentMode].colBotRatio ? currentSplits[currentMode].colBotRatio : 0.5
+        });
+
+        if (win) {
+            nextWindows.push(win);
+            root.activeGridWindows = nextWindows;
+        }
+    }
+
+    function openSectorBreadth() {
+        if (root.activeBreadthWindow && root.activeBreadthWindow.visible) {
+            if (typeof root.activeBreadthWindow.raise === "function")
+                root.activeBreadthWindow.raise();
+            if (typeof root.activeBreadthWindow.requestActivate === "function")
+                root.activeBreadthWindow.requestActivate();
+            return;
+        }
+
+        var win = sectorBreadthWindowComponent.createObject(root, {
+            controller: root,
+            sectorsHoldings: root.sectorsHoldings || ({}),
+            equalMetrics: root.breadthEqualMetrics || [],
+            capMetrics: root.breadthCapMetrics || [],
+            lastFetchedAt: root.breadthLastFetchedAt || 0,
+            weightMode: root.breadthWeightMode || "equal",
+            sortTimeframe: root.breadthSortTimeframe || "1Y",
+            sortAsc: root.breadthSortAsc === true
+        });
+
+        if (win) {
+            root.activeBreadthWindow = win;
+        }
+    }
+
+    Component {
+        id: sectorBreadthWindowComponent
+        SectorBreadthWindow {
+            id: breadthWin
+            visible: true
+
+            onStateSaveRequested: function (weightMode, sortTimeframe, sortAsc) {
+                root.breadthWeightMode = weightMode;
+                root.breadthSortTimeframe = sortTimeframe;
+                root.breadthSortAsc = sortAsc;
+                root.persist();
+            }
+
+            onVisibleChanged: {
+                if (!visible) {
+                    root.activeBreadthWindow = null;
+                    breadthWin.destroy();
+                }
+            }
+        }
+    }
+
+    Component {
+        id: gridWindowComponent
+        GridWindow {
+            id: gridWin
+            visible: true
+            discordWebhook: root.discordWebhook
+
+            onStateSaveRequested: function (mode, sync, symbols, splits) {
+                root.gridMode = mode;
+                root.gridSync = sync;
+                root.gridSymbols = symbols;
+                var nextSplits = Object.assign({}, root.gridSplits || ({}));
+                nextSplits[mode] = splits[mode];
+                root.gridSplits = nextSplits;
+                root.persist();
+            }
+
+            onVisibleChanged: {
+                if (!visible) {
+                    var remaining = [];
+                    for (var i = 0; i < root.activeGridWindows.length; i++) {
+                        var w = root.activeGridWindows[i];
+                        if (w && w !== gridWin && w.visible)
+                            remaining.push(w);
+                    }
+                    root.activeGridWindows = remaining;
+                    gridWin.destroy();
+                }
+            }
+        }
+    }
+}

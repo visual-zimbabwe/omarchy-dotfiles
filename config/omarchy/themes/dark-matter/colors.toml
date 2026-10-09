@@ -1,0 +1,67 @@
+# Dark Matter: A deep cosmic void aesthetic built around a #000000 true black canvas,
+# #0A0906 obsidian warm black accents, and rich multi-tiered dark surfaces.
+mode = "dark"
+theme_type = "dark"
+
+# Primary Accent (Stellar Gold / Cosmic Amber)
+accent = "#C9A050"
+
+# Selection & Focus
+selection = "#26231C"
+selection_background = "#26231C"
+selection_foreground = "#FFFDF8"
+cursor = "#FFFFFF"
+
+# Background Spectrum
+background = "#000000"
+dark_background = "#0A0906"
+darker_background = "#050403"
+lighter_background = "#14120E"
+
+# Typography & Text Hierarchy
+foreground = "#ECE6D8"
+dark_foreground = "#7A7362"
+light_foreground = "#FAF7EE"
+bright_foreground = "#FFFFFF"
+muted = "#5C5648"
+
+# Hyprland Border Tokens
+hyprland_active_border = "rgba(C9A050ee) rgba(0A0906ee) 45deg"
+hyprland_inactive_border = "rgba(0A0906cc)"
+active_border_color = "#C9A050"
+active_tab_background = "#0A0906"
+
+# ANSI 16-Color Palette
+color0 = "#000000"
+color1 = "#E05A47"
+color2 = "#7EBA68"
+color3 = "#E5B842"
+color4 = "#5D93B8"
+color5 = "#A872D1"
+color6 = "#4EB8BA"
+color7 = "#ECE6D8"
+color8 = "#5C5648"
+color9 = "#FF6E5A"
+color10 = "#98D87E"
+color11 = "#FFD05B"
+color12 = "#78B0D6"
+color13 = "#C28BEA"
+color14 = "#6AD4D6"
+color15 = "#FFFFFF"
+
+# Semantic Color Names
+red = "#E05A47"
+green = "#7EBA68"
+yellow = "#E5B842"
+orange = "#E68A38"
+blue = "#5D93B8"
+magenta = "#A872D1"
+cyan = "#4EB8BA"
+brown = "#6E4D30"
+
+bright_red = "#FF6E5A"
+bright_green = "#98D87E"
+bright_yellow = "#FFD05B"
+bright_blue = "#78B0D6"
+bright_magenta = "#C28BEA"
+bright_cyan = "#6AD4D6"

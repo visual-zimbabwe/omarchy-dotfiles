@@ -1,8 +1,8 @@
 {
   "version": 1,
   "idle": {
-    "screensaver": 150,
-    "lock": 3600
+    "screensaver": 3600,
+    "lock": 43200
   },
   "bar": {
     "position": "top",
@@ -14,8 +14,7 @@
           "id": "omarchy.menu"
         },
         {
-          "id": "jankeesvw.workspace-name",
-          "numbers": true
+          "id": "omarchy.workspaces"
         },
         {
           "id": "omarchy.media"
@@ -38,16 +37,6 @@
           "id": "omarchy.weather"
         },
         {
-          "id": "juwimana.omarchy-clock"
-        },
-        {
-          "id": "sebasgl23.snake",
-          "bestScore": 18
-        },
-        {
-          "id": "slcode777.omagotchi"
-        },
-        {
           "id": "omarchy.system-update"
         }
       ],
@@ -58,6 +47,33 @@
             "NordVPN"
           ],
           "hidden": []
+        },
+        {
+          "id": "yamz8.omanki"
+        },
+        {
+          "id": "alexzeitler.ytdlp"
+        },
+        {
+          "id": "mohamedmansour.finance",
+          "showChange": true,
+          "showPrice": true,
+          "showTicker": true
+        },
+        {
+          "id": "juwimana.strat-journal"
+        },
+        {
+          "id": "juwimana.surrey-rentals"
+        },
+        {
+          "id": "bjarneo.workspace-layout"
+        },
+        {
+          "id": "io.github.ejuro.omamap"
+        },
+        {
+          "id": "io.github.ejuro.blow-off-some-steam"
         },
         {
           "id": "jankeesvw.notification-center"
@@ -86,5 +102,18 @@
       ]
     }
   },
-  "plugins": []
+  "plugins": [
+    {
+      "id": "fkcodes.key-promoter"
+    },
+    {
+      "id": "juwimana.lock"
+    }
+  ],
+  "disabledPlugins": [
+    "omarchy.lock"
+  ],
+  "cloneSourceRestores": [
+    "juwimana.lock"
+  ]
 }

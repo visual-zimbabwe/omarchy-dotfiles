@@ -1,0 +1,46 @@
+/* Dark Matter Theme for Obsidian */
+
+.theme-dark, .theme-light {
+  /* Core surfaces: True black void notes with obsidian sidebars */
+  --background-primary: #000000;
+  --background-primary-alt: #0A0906;
+  --background-secondary: #0A0906;
+  --background-secondary-alt: #14120E;
+  --text-normal: #ECE6D8;
+
+  /* Selection colors */
+  --text-selection: #26231C;
+
+  /* Border color */
+  --background-modifier-border: #38342A;
+  --background-modifier-border-hover: #C9A050;
+  --background-modifier-border-focus: #C9A050;
+
+  /* Semantic heading colors */
+  --text-title-h1: #C9A050;
+  --text-title-h2: #ECE6D8;
+  --text-title-h3: #FAF7EE;
+  --text-title-h4: #5D93B8;
+  --text-title-h5: #4EB8BA;
+  --text-title-h6: #A872D1;
+
+  /* Links and accents */
+  --text-link: #4EB8BA;
+  --text-accent: #C9A050;
+  --text-accent-hover: #DFB666;
+  --interactive-accent: #C9A050;
+  --interactive-accent-hover: #DFB666;
+
+  /* Muted text */
+  --text-muted: #7A7362;
+  --text-faint: #5C5648;
+
+  /* Code */
+  --code-normal: #4EB8BA;
+  --code-background: #0A0906;
+
+  /* Errors and success */
+  --text-error: #E05A47;
+  --text-success: #7EBA68;
+  --text-warning: #E5B842;
+}

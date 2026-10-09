@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "id": "yamz8.omanki",
+  "name": "omanki",
+  "version": "1.9.0",
+  "author": "yamz8",
+  "license": "MIT",
+  "description": "Spaced-repetition flashcards in the bar",
+  "kinds": [
+    "overlay",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Omanki.qml",
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "omanki",
+    "description": "Review flashcards without leaving the bar",
+    "category": "Plugin",
+    "defaultSection": "right",
+    "allowMultiple": false,
+    "defaults": {
+      "deck": "",
+      "newPerDay": 20,
+      "reviewsPerDay": 0,
+      "showCount": true,
+      "leechThreshold": 8,
+      "leechSuspend": true,
+      "lapsePercent": 50
+    },
+    "schema": [
+      {
+        "key": "deck",
+        "type": "path",
+        "label": "Deck file",
+        "defaultValue": "",
+        "description": "Path to the deck. Leave empty for ~/.local/share/omanki/cards.json."
+      },
+      {
+        "key": "newPerDay",
+        "type": "integer",
+        "label": "New cards per day",
+        "min": 0,
+        "max": 500,
+        "step": 5,
+        "defaultValue": 20,
+        "description": "How many unseen cards to introduce per study day. 0 reviews only."
+      },
+      {
+        "key": "reviewsPerDay",
+        "type": "integer",
+        "label": "Review cap per day",
+        "min": 0,
+        "max": 1000,
+        "step": 10,
+        "defaultValue": 0,
+        "description": "Cap how many due cards a day serves. 0 means no cap. Cards introduced today do not count against it."
+      },
+      {
+        "key": "showCount",
+        "type": "boolean",
+        "label": "Show waiting count",
+        "defaultValue": true,
+        "description": "Show the number of waiting cards next to the bar glyph."
+      },
+      {
+        "key": "lapsePercent",
+        "type": "integer",
+        "label": "Interval kept on a lapse",
+        "min": 0,
+        "max": 100,
+        "step": 5,
+        "defaultValue": 50,
+        "description": "How much of a forgotten card's interval survives, as a percentage. 0 sends it back to a single day, which is Anki's default."
+      },
+      {
+        "key": "leechThreshold",
+        "type": "integer",
+        "label": "Leech threshold",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "defaultValue": 8,
+        "description": "How many times a card may be forgotten before it counts as a leech. 0 turns leeches off."
+      },
+      {
+        "key": "leechSuspend",
+        "type": "boolean",
+        "label": "Suspend leeches",
+        "defaultValue": true,
+        "description": "Take a leech out of the rotation rather than only marking it. Restore them from the statistics view."
+      }
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 # Evergreen
 
-A dark, green-tinted theme for [Omarchy Quattro](https://github.com/basecamp/omarchy).
+A dark, green-tinted theme for [Omarchy Quattro](https://github.com/omacom/omarchy).
 
 ![Preview](preview.png)
 

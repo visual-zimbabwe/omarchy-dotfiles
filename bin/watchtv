@@ -1,0 +1,432 @@
+#!/usr/bin/env python3
+"""
+watchtv - Modern, beautiful CLI Movie & TV Show Streamer.
+Directly queries the index, shows full untruncated release names with subtitle & season highlights,
+supports Season Pack / Episode selection, MPV playlist playback, and streams instantly in mpv.
+"""
+
+import sys
+import os
+import subprocess
+import urllib.request
+import urllib.parse
+import json
+import re
+import shutil
+import concurrent.futures
+
+HELP_TEXT = """\033[1;36m
+  🎬 watchtv - CLI Movie & TV Show Streamer
+\033[0m
+Usage:
+  \033[1;32mwatchtv <search query>\033[0m             Search for a show/movie and stream in mpv
+  \033[1;32mwatchtv <query> -e <ep>\033[0m            Target specific episode (e.g. watchtv "bad sisters s01" -e 3)
+  \033[1;32mwatchtv <query> -p\033[0m                 Stream entire season as an MPV playlist (use < and > to skip)
+  \033[1;32mwatchtv -s <magnet-link>\033[0m           Stream a magnet link directly
+  \033[1;32mwatchtv <query> -o ~/Videos/\033[0m       Save the video to disk while watching
+  \033[1;32mwatchtv <query> -n 50\033[0m              Set max results to display (default: 25)
+  \033[1;32mwatchtv --help\033[0m                     Show this help message
+
+Options:
+  \033[1;33m-e, --episode <num>\033[0m    Target a specific episode number
+  \033[1;33m-p, --playlist\033[0m         Open all episodes in MPV as a playlist
+  \033[1;33m-i, --interactive\033[0m      Interactively choose episode file from season pack
+  \033[1;33m--peerflix\033[0m             Use Peerflix engine instead of WebTorrent
+  \033[1;33m-o, --out <dir>\033[0m        Save video permanently to destination folder
+  \033[1;33m-n, --limit <num>\033[0m      Max search results to list
+
+Examples:
+  watchtv "Bad Sisters S01"
+  watchtv "Bad Sisters S01" -p             (Play entire season as MPV playlist!)
+  watchtv "Severance S01" -e 3             (Select Episode 3 directly)
+  watchtv "Grey's Anatomy"                 (Apostrophes & punctuation cleaned automatically!)
+
+Tips for Best Results:
+  • Look for \033[1;35m[SEASON PACK]\033[0m for complete seasons with all episodes.
+  • Look for \033[1;33m[MULTi]\033[0m or \033[1;32m[ESub/PSA]\033[0m for built-in English subtitles.
+  • Pick results with high \033[1;32mSEED\033[0m counts for instant, buffer-free playback.
+  • Press \033[1;36mj\033[0m in mpv to cycle subtitle tracks, or \033[1;36mv\033[0m to toggle them on/off.
+  • Press \033[1;36m<\033[0m and \033[1;36m>\033[0m in mpv to skip between episodes in Playlist mode.
+"""
+
+def sanitize_query(query_parts):
+    query = " ".join(query_parts)
+    cleaned = re.sub(r"['\":?!,]", "", query)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+def format_size(bytes_val):
+    try:
+        b = float(bytes_val)
+        if b >= 1024 * 1024 * 1024:
+            return f"{b / (1024**3):.2f} GiB"
+        elif b >= 1024 * 1024:
+            return f"{b / (1024**2):.1f} MiB"
+        return f"{b / 1024:.0f} KiB"
+    except Exception:
+        return "N/A"
+
+def is_season_pack(name: str) -> bool:
+    """Detect if release is a multi-episode Season pack."""
+    norm = name.lower()
+    if re.search(r"\b(complete|season\s*\d+\b|s\d{1,2}(?!\s*e\d{1,2})\b|s\d{1,2}-s\d{1,2}|batch|all\s*episodes|pack)\b", norm):
+        # Make sure it's not a single episode release like S01E03
+        if not re.search(r"\bs\d{1,2}e\d{1,2}\b", norm):
+            return True
+        elif "complete" in norm or "season" in norm or "pack" in norm:
+            return True
+    return False
+
+def highlight_name(name):
+    # Highlight useful tags for easy reading
+    formatted = name
+    if is_season_pack(name):
+        formatted = f"\033[1;45;97m[SEASON PACK]\033[0m {formatted}"
+
+    formatted = re.sub(r"(?i)\b(multi|multisubs?)\b", "\033[1;33m\\1\033[0m", formatted)
+    formatted = re.sub(r"(?i)\b(esub|esubs|sub|subs)\b", "\033[1;32m\\1\033[0m", formatted)
+    formatted = re.sub(r"(?i)\b(1080p|720p|2160p|4k)\b", "\033[1;36m\\1\033[0m", formatted)
+    formatted = re.sub(r"(?i)\b(x265|hevc|10bit)\b", "\033[1;35m\\1\033[0m", formatted)
+    formatted = re.sub(r"(?i)\b(s\d{1,2}e\d{1,2})\b", "\033[1;32m\\1\033[0m", formatted)
+    return formatted
+
+STOP_WORDS = {
+    "the", "a", "an", "of", "in", "and", "or", "to", "for", "on", "with",
+    "at", "by", "from", "del", "la", "le", "il", "lo", "un", "una", "de",
+    "di", "el", "los", "las", "der", "die", "das"
+}
+
+def normalize_text(text):
+    text = text.lower()
+    text = re.sub(r"[._\-+\[\](){}'\":?!,/]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+def calculate_match_score(release_name, query, target_episode=None):
+    norm_release = normalize_text(release_name)
+    norm_query = normalize_text(query)
+    
+    release_words = norm_release.split()
+    query_words = norm_query.split()
+    
+    if not query_words:
+        return 0.0
+        
+    sig_query_words = [w for w in query_words if w not in STOP_WORDS]
+    if not sig_query_words:
+        sig_query_words = query_words
+        
+    matched_count = 0
+    for q_word in sig_query_words:
+        stem = q_word[:-1] if q_word.endswith("s") and len(q_word) > 3 else q_word
+        if any(stem == rw or rw.startswith(stem) or stem in rw for rw in release_words):
+            matched_count += 1
+            
+    if matched_count < len(sig_query_words):
+        return 0.0
+        
+    score = 10.0
+    query_phrase = " ".join(query_words)
+    sig_phrase = " ".join(sig_query_words)
+    
+    if query_phrase in norm_release:
+        score += 100.0
+    elif sig_phrase in norm_release:
+        score += 80.0
+    else:
+        stemmed_sig_phrase = " ".join([w[:-1] if w.endswith("s") and len(w) > 3 else w for w in sig_query_words])
+        if stemmed_sig_phrase in norm_release:
+            score += 70.0
+            
+    year_match = re.search(r"\b(19\d\d|20\d\d)\b", norm_query)
+    if year_match and year_match.group(1) in norm_release:
+        score += 40.0
+
+    # Season pack bonus when searching for seasons
+    if is_season_pack(release_name):
+        score += 30.0
+
+    # Target episode bonus
+    if target_episode:
+        ep_patterns = [
+            f"e{int(target_episode):02d}",
+            f"e{int(target_episode)}",
+            f"episode {int(target_episode)}",
+        ]
+        if any(ep in norm_release for ep in ep_patterns):
+            score += 150.0
+
+    return score
+
+def fetch_apibay(query, target_episode=None):
+    try:
+        url = f"https://apibay.org/q.php?q={urllib.parse.quote(query)}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if isinstance(data, list) and data and data[0].get("name") != "No results returned":
+                results = []
+                for item in data:
+                    name = item.get("name", "Unknown")
+                    info_hash = item.get("info_hash", "").lower()
+                    if not info_hash:
+                        continue
+                    score = calculate_match_score(name, query, target_episode)
+                    if score > 0:
+                        results.append({
+                            "name": name,
+                            "info_hash": info_hash,
+                            "seeders": int(item.get("seeders", 0)),
+                            "size": int(item.get("size", 0)),
+                            "score": score,
+                        })
+                return results
+    except Exception:
+        pass
+    return []
+
+def fetch_solidtorrents(query, target_episode=None):
+    try:
+        url = f"https://solidtorrents.to/api/v1/search?q={urllib.parse.quote(query)}&category=video"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results_raw = data.get("results", [])
+            results = []
+            for item in results_raw:
+                name = item.get("title", "Unknown")
+                info_hash = (item.get("infohash") or "").lower()
+                if not info_hash:
+                    continue
+                score = calculate_match_score(name, query, target_episode)
+                if score > 0:
+                    results.append({
+                        "name": name,
+                        "info_hash": info_hash,
+                        "seeders": int(item.get("seeders", 0)),
+                        "size": int(item.get("size", 0)),
+                        "score": score,
+                    })
+            return results
+    except Exception:
+        pass
+    return []
+
+def fetch_eztv(query, target_episode=None):
+    try:
+        url = f"https://eztvx.to/api/get-torrents?limit=100&search={urllib.parse.quote(query)}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            torrents = data.get("torrents", [])
+            results = []
+            for item in torrents:
+                name = item.get("filename") or item.get("title") or "Unknown"
+                info_hash = (item.get("hash") or "").lower()
+                if not info_hash:
+                    continue
+                score = calculate_match_score(name, query, target_episode)
+                if score > 0:
+                    results.append({
+                        "name": name,
+                        "info_hash": info_hash,
+                        "seeders": int(item.get("seeds", 0)),
+                        "size": int(item.get("size_bytes", 0)),
+                        "score": score,
+                    })
+            return results
+    except Exception:
+        pass
+    return []
+
+def search_torrents(query, target_episode=None):
+    all_results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [
+            executor.submit(fetch_apibay, query, target_episode),
+            executor.submit(fetch_solidtorrents, query, target_episode),
+            executor.submit(fetch_eztv, query, target_episode),
+        ]
+        for f in concurrent.futures.as_completed(futures):
+            try:
+                res = f.result()
+                if res:
+                    all_results.extend(res)
+            except Exception:
+                pass
+
+    seen = set()
+    deduped = []
+    for item in all_results:
+        h = item.get("info_hash")
+        if h and h not in seen:
+            seen.add(h)
+            deduped.append(item)
+
+    # Rank by relevance score multiplied by bonus weight, then seed count
+    deduped.sort(key=lambda x: (x.get("score", 0) * 1000 + x.get("seeders", 0)), reverse=True)
+    return deduped
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help", "help"]:
+        print(HELP_TEXT)
+        sys.exit(0)
+
+    if sys.argv[1] in ["-s", "--stream"] and len(sys.argv) > 2:
+        magnet = sys.argv[2]
+        extra_args = sys.argv[3:]
+        subprocess.run(["stream-torrent", magnet] + extra_args)
+        return
+
+    save_dir = None
+    limit = 25
+    target_episode = None
+    playlist_mode = False
+    use_peerflix = False
+    interactive_mode = True
+    query_parts = []
+
+    i = 1
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg in ["-o", "--out", "--save"] and i + 1 < len(sys.argv):
+            save_dir = sys.argv[i + 1]
+            i += 2
+        elif arg in ["-n", "-l", "--limit"] and i + 1 < len(sys.argv):
+            try:
+                limit = int(sys.argv[i + 1])
+            except ValueError:
+                pass
+            i += 2
+        elif arg.startswith("--limit="):
+            try:
+                limit = int(arg.split("=", 1)[1])
+            except ValueError:
+                pass
+            i += 1
+        elif arg in ["-e", "--episode", "--ep"] and i + 1 < len(sys.argv):
+            target_episode = sys.argv[i + 1].lstrip("eE")
+            i += 2
+        elif arg.startswith("--episode=") or arg.startswith("--ep="):
+            target_episode = arg.split("=", 1)[1].lstrip("eE")
+            i += 1
+        elif arg in ["-p", "--playlist", "--all"]:
+            playlist_mode = True
+            interactive_mode = False
+            i += 1
+        elif arg in ["-i", "--interactive"]:
+            interactive_mode = True
+            playlist_mode = False
+            i += 1
+        elif arg in ["--peerflix"]:
+            use_peerflix = True
+            i += 1
+        else:
+            query_parts.append(arg)
+            i += 1
+
+    clean_query = sanitize_query(query_parts)
+    if not clean_query:
+        print(HELP_TEXT)
+        sys.exit(0)
+
+    print(f"\033[1;34m🔍 Searching for: \"{clean_query}\"...\033[0m\n")
+
+    try:
+        results = search_torrents(clean_query, target_episode)
+    except Exception as e:
+        print(f"\033[1;31mError searching index: {e}\033[0m")
+        sys.exit(1)
+
+    if not results:
+        print(f"\033[1;33mNo results found for \"{clean_query}\".\033[0m")
+        print("Tip: Try searching with fewer words or omitting years/resolutions.")
+        sys.exit(0)
+
+    term_width = shutil.get_terminal_size((100, 24)).columns
+
+    print(f" {'#':<3}  {'SEED':>6}   {'SIZE':>9}   {'NAME'}")
+    print(" " + "─" * (min(term_width - 2, 110)))
+
+    max_display = min(len(results), max(1, limit))
+    for idx in range(max_display):
+        item = results[idx]
+        seeds = int(item.get("seeders", 0))
+        size_str = format_size(item.get("size", 0))
+        name = item.get("name", "Unknown")
+
+        # Colorize seed count (green for high, yellow for medium, red for low)
+        if seeds >= 50:
+            seed_color = f"\033[1;32m{seeds:>6}\033[0m"
+        elif seeds >= 10:
+            seed_color = f"\033[1;33m{seeds:>6}\033[0m"
+        else:
+            seed_color = f"\033[0;31m{seeds:>6}\033[0m"
+
+        highlighted = highlight_name(name)
+        print(f" \033[1;37m{idx:<3}\033[0m  {seed_color}   {size_str:>9}   {highlighted}")
+
+    print(" " + "─" * (min(term_width - 2, 110)))
+
+    while True:
+        try:
+            prompt_str = f"\n\033[1;36mSelect a number (0-{max_display-1}) [or append 'p' for playlist, e.g. '0p'], or 'q' to quit:\033[0m "
+            choice = input(prompt_str).strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nExiting.")
+            sys.exit(0)
+
+        if choice.lower() in ["q", "quit", "exit"]:
+            sys.exit(0)
+
+        # Check if choice specifies playlist mode suffix, e.g. "0p"
+        choice_clean = choice
+        row_playlist = playlist_mode
+        if choice.lower().endswith("p") and choice[:-1].isdigit():
+            choice_clean = choice[:-1]
+            row_playlist = True
+
+        if choice_clean.isdigit() and 0 <= int(choice_clean) < max_display:
+            selected = results[int(choice_clean)]
+            info_hash = selected["info_hash"]
+            name = selected.get("name", "video")
+            magnet = f"magnet:?xt=urn:btih:{info_hash}&dn={urllib.parse.quote(name)}"
+
+            cmd = ["stream-torrent", magnet]
+            if save_dir:
+                cmd += ["-o", save_dir]
+            if use_peerflix:
+                cmd += ["--peerflix"]
+            if row_playlist:
+                cmd += ["--playlist"]
+            elif target_episode:
+                cmd += ["-e", str(target_episode)]
+            elif interactive_mode:
+                cmd += ["-i"]
+
+            print(f"\n\033[1;32m▶ Streaming:\033[0m {name}\n")
+            try:
+                subprocess.run(cmd)
+            except KeyboardInterrupt:
+                pass
+            break
+        else:
+            print(f"\033[1;31mInvalid choice. Please enter a number between 0 and {max_display-1}.\033[0m")
+
+if __name__ == "__main__":
+    main()

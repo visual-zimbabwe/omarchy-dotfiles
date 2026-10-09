@@ -11,7 +11,7 @@ usual play, pause, previous, and next controls.
 
 ## Features
 
-- Precise drag rotation and deep wheel zoom on a theme-aware globe
+- Kinetic drag rotation that highlights a nearby station when it settles, plus deep wheel zoom on a theme-aware globe
 - A fast cached world view that progressively adds thousands of stations and keeps the session catalog when closed
 - Country stations stay on the session globe and take priority over background signals
 - Country-level map estimates when a station has no published coordinates
@@ -20,11 +20,12 @@ usual play, pause, previous, and next controls.
 - Instant cached results while full-directory search and country browsing refresh from Radio Browser
 - Random tuning that avoids recent stations, plus favorites and listening history
 - Independent volume slider, mute, and bar-wheel volume control
-- Click-through desktop focus outside the atlas panel
+- Audio output picker that routes radio to any PipeWire sink, including AirPlay speakers exposed as RAOP sinks
+- Centered, floating window with normal Omarchy window-manager behavior
 - Automatic dismissal when Omarchy starts its screensaver
 - Keyboard navigation
 - Persistent world and country caches with background refresh and transient retries
-- Automatic skip to the next playlist entry when a stream fails
+- Keeps your chosen station selected if its stream fails, with explicit retry or next controls
 
 ## Install
 
@@ -46,7 +47,7 @@ Stop the independent radio player before removing the plugin:
 omarchy plugin remove akshar.radio-atlas
 ```
 
-Favorites, listening history, and the saved volume remain in
+Favorites, listening history, volume, and the selected audio output remain in
 `~/.local/share/radio-atlas/state.json` so reinstalling restores them. Remove
 `~/.local/share/radio-atlas/` manually if you also want to delete that data.
 
@@ -54,7 +55,7 @@ Favorites, listening history, and the saved volume remain in
 
 | Input | Action |
 | --- | --- |
-| Drag globe | Rotate |
+| Drag or flick globe | Rotate; a flick coasts and highlights a nearby station |
 | Wheel over globe | Zoom |
 | Click signal | Play station |
 | Click country | Browse country |
@@ -66,10 +67,62 @@ Favorites, listening history, and the saved volume remain in
 | `F` | Favorite selected station |
 | `+` / `-` | Raise or lower radio volume |
 | `M` | Mute or unmute |
-| Escape | Clear search or close |
+| Speaker icon | Choose the audio output |
+| `?` | Show or hide controls |
+| Escape | Hide controls, clear search, or close |
 
 On the bar, left click opens Radio Atlas, middle click tunes randomly, right
 click stops its player, and the mouse wheel adjusts radio volume.
+
+If a station disconnects or cannot be played, Radio Atlas keeps it selected and
+shows the failure. Click the play button to retry that station, or Next/Previous
+to choose another queued station. It does not automatically reconnect or switch
+stations. A repeated opening clip can come from the station's stream server;
+retrying may play that same clip again. Radio Browser supplies station listings,
+not the audio streams.
+
+Fresh world and country caches load without DNS lookups. The globe skips
+off-screen station markers when zoomed in, and player-status updates for the
+same station preserve the landing highlight without repainting the globe.
+
+## Audio outputs and AirPlay
+
+The speaker button next to the volume slider chooses where radio plays. It lists
+every PipeWire output device through `pactl`, which ships with Omarchy's
+PipeWire setup. "System default" follows the desktop's current output, the
+choice is saved alongside the volume in `~/.local/share/radio-atlas/state.json`,
+and switching while playing takes effect immediately. If the chosen device
+disappears, mpv may pause and will not always resume when it returns. Choose
+"System default" or another available output, then resume playback.
+
+AirPlay speakers appear in this list once PipeWire exposes them as RAOP sinks.
+On Arch Linux, the RAOP modules ship in the optional `pipewire-zeroconf`
+package. Install it, enable discovery, and restart the user services:
+
+```bash
+sudo pacman -S pipewire-zeroconf
+mkdir -p ~/.config/pipewire/pipewire.conf.d
+cp /usr/share/pipewire/pipewire.conf.avail/50-raop.conf \
+  ~/.config/pipewire/pipewire.conf.d/
+systemctl --user restart pipewire wireplumber
+```
+
+If you run a firewall such as ufw, allow the timing feedback AirPlay speakers
+send back to the sender on UDP ports 6001-6002; without it the session connects
+but the speaker stays silent:
+
+```bash
+sudo ufw allow in from 192.168.0.0/16 to any port 6001:6002 proto udp
+```
+
+PipeWire's RAOP discovery occasionally drops a sink when a device briefly
+stops announcing itself over mDNS. If an AirPlay speaker disappears from the
+output list, re-discover it with `systemctl --user restart pipewire wireplumber`.
+
+PipeWire's RAOP sink streams classic AirPlay audio as uncompressed PCM.
+AirPort Express, Apple TV, many AV receivers, and HomePods accept it; AirPlay 2
+only features such as HomePod stereo pairs are not supported. A device that
+refuses the stream simply stays silent; pick another output to recover.
 
 ## Data and privacy
 

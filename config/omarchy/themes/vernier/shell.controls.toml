@@ -1,0 +1,26 @@
+# Focus is the only state that gets colour; the stock template makes it identical to hover.
+[controls]
+normal-color        = "#b3b9bd"
+normal-fill-alpha   = 0.03
+normal-border       = "#b3b9bd"
+normal-border-width = 1
+normal-border-alpha = 0.22
+
+hover-cursor-color        = "#b3b9bd"
+hover-cursor-fill-alpha   = 0.07
+hover-cursor-border       = "#b3b9bd"
+hover-cursor-border-width = 1
+hover-cursor-border-alpha = 0.34
+
+focus-color        = "accent"
+focus-fill-alpha   = 0.10
+focus-border       = "accent"
+focus-border-width = 1
+focus-border-alpha = 0.95
+
+selected-color        = "#c8ccd0"
+selected-fill-alpha   = 0.14
+selected-border-width = 0
+
+pressed-fill-alpha   = 0.20
+selection-fill-alpha = 0.35

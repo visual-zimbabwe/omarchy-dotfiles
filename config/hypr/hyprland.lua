@@ -27,3 +27,6 @@ require("default.hypr.toggles")
 
 -- Add any other personal Hyprland configuration below.
 -- o.window("qemu", { workspace = "5" })
+
+-- Added by the Omarchy Workspace Layout plugin: registers its Lua tiling layouts.
+do local path = (os.getenv("XDG_CONFIG_HOME") or os.getenv("HOME") .. "/.config") .. "/hypr/omarchy-workspace-layout.lua"; local file = io.open(path, "r"); if file then file:close(); dofile(path) end end

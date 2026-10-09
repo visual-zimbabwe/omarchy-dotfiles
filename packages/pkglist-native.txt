@@ -16,9 +16,8 @@ chromium
 clang
 cliamp
 cups
-cups-browsed
 cups-filters
-cups-pdf
+cups-pk-helper
 ddcutil
 docker
 docker-buildx
@@ -37,6 +36,7 @@ fcitx5-gtk
 fcitx5-qt
 fd
 ffmpegthumbnailer
+foliate
 foot
 fprintd
 fzf
@@ -79,6 +79,8 @@ libyaml
 limine
 linux
 linux-firmware
+linux-omarchy
+linux-omarchy-headers
 llvm
 localsend
 lua51
@@ -93,13 +95,14 @@ mpv-mpris
 nautilus
 nautilus-python
 networkmanager
+newsboat
 nordvpn-bin
 noto-fonts
 noto-fonts-cjk
 noto-fonts-emoji
 nss-mdns
-obs-studio
 obsidian
+obs-studio
 omacalc
 omacut
 omarchy
@@ -141,7 +144,6 @@ thermald
 tldr
 tmux
 tobi-try
-tradingview
 tree-sitter-cli
 ttf-ia-writer
 ttf-jetbrains-mono-nerd-basic
