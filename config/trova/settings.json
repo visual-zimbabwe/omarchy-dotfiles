@@ -1,0 +1,11 @@
+{
+  "enabled_services": [
+    "netflix",
+    "prime",
+    "max",
+    "paramount_plus",
+    "cbc_gem",
+    "bbc_iplayer",
+    "sbs_on_demand"
+  ]
+}

@@ -223,6 +223,26 @@ if [[ -d "config" ]]; then
   done
 fi
 
+# D. Restore Omarchy Widget State & Layouts
+if [[ -d "state" ]]; then
+  echo -e "--> Restoring Omarchy state & widget layouts (Omafinance, workspaces, omanki)..."
+  mkdir -p "$HOME/.local/state/omarchy/settings" "$HOME/.local/state/omarchy/workspace-layouts"
+  [[ -f "state/settings/finance.json" ]] && cp -f "state/settings/finance.json" "$HOME/.local/state/omarchy/settings/"
+  [[ -f "state/omanki.json" ]] && cp -f "state/omanki.json" "$HOME/.local/state/omarchy/"
+  [[ -f "state/omagotchi-settings.json" ]] && cp -f "state/omagotchi-settings.json" "$HOME/.local/state/omarchy/"
+  [[ -f "state/key-promoter.json" ]] && cp -f "state/key-promoter.json" "$HOME/.local/state/omarchy/"
+  if [[ -d "state/workspace-layouts" ]]; then
+    cp -rf "state/workspace-layouts"/* "$HOME/.local/state/omarchy/workspace-layouts/" 2>/dev/null || true
+  fi
+fi
+
+# E. Restore Custom Application Launchers
+if [[ -d "applications" ]]; then
+  echo -e "--> Restoring custom desktop application launchers..."
+  mkdir -p "$HOME/.local/share/applications"
+  cp -rf applications/* "$HOME/.local/share/applications/" 2>/dev/null || true
+fi
+
 # Fix permissions
 chmod 700 "$HOME/.config/cliamp" 2>/dev/null || true
 

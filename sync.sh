@@ -78,7 +78,7 @@ copy_clean() {
 }
 
 # Standard config directories
-for cfg in alacritty btop fcitx5 foot ghostty kitty lazygit mpv tmux; do
+for cfg in alacritty btop fcitx5 foot ghostty kitty lazygit mpv tmux mov-cli Omacom trova fish; do
   copy_clean "$HOME_DIR/.config/$cfg" "$REPO_DIR/config/$cfg"
 done
 
@@ -105,6 +105,24 @@ if [[ -f "$HOME_DIR/.config/git/config" ]]; then
   sed -E 's|helper = !/home/[^/]+/\.local/share/mise/installs/gh/[^/]+/gh_[^/]+/bin/gh auth git-credential|helper = !gh auth git-credential|g' \
     "$HOME_DIR/.config/git/config" > "$REPO_DIR/config/git/config"
 fi
+
+# 5. Export Omarchy State & Widget Settings
+echo -e "${GREEN}--> Exporting Omarchy settings & widget state...${RESET}"
+mkdir -p "$REPO_DIR/state/settings" "$REPO_DIR/state/workspace-layouts"
+[[ -f "$HOME_DIR/.local/state/omarchy/settings/finance.json" ]] && cp -f "$HOME_DIR/.local/state/omarchy/settings/finance.json" "$REPO_DIR/state/settings/"
+[[ -f "$HOME_DIR/.local/state/omarchy/omanki.json" ]] && cp -f "$HOME_DIR/.local/state/omarchy/omanki.json" "$REPO_DIR/state/"
+[[ -f "$HOME_DIR/.local/state/omarchy/omagotchi-settings.json" ]] && cp -f "$HOME_DIR/.local/state/omarchy/omagotchi-settings.json" "$REPO_DIR/state/"
+[[ -f "$HOME_DIR/.local/state/omarchy/key-promoter.json" ]] && cp -f "$HOME_DIR/.local/state/omarchy/key-promoter.json" "$REPO_DIR/state/"
+if [[ -d "$HOME_DIR/.local/state/omarchy/workspace-layouts" ]]; then
+  cp -rf "$HOME_DIR/.local/state/omarchy/workspace-layouts"/* "$REPO_DIR/state/workspace-layouts/" 2>/dev/null || true
+fi
+
+# 6. Export Custom Application Launchers
+echo -e "${GREEN}--> Exporting custom application launchers...${RESET}"
+mkdir -p "$REPO_DIR/applications"
+for desktop in OmaThonny.desktop trova.desktop android-studio.desktop; do
+  [[ -f "$HOME_DIR/.local/share/applications/$desktop" ]] && cp -f "$HOME_DIR/.local/share/applications/$desktop" "$REPO_DIR/applications/"
+done
 
 echo -e "\n${BOLD}${GREEN}✔ System state synced successfully!${RESET}"
 echo -e "You can now commit and push the latest configuration:"

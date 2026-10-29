@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=OmaThonny
+GenericName=Python IDE for Omarchy
+Comment=Opinionated, Beautiful Python & MicroPython IDE with Visual AST Stepper
+Exec=/home/juwimana/.local/bin/omathonny %F
+Icon=/home/juwimana/.local/share/icons/hicolor/scalable/apps/omathonny.svg
+Terminal=false
+Type=Application
+Categories=Development;IDE;
+MimeType=text/x-python;application/x-python-code;
+StartupWMClass=omathonny
+Keywords=python;micropython;thonny;ide;omarchy;

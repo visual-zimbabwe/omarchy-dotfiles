@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Trova
+GenericName=Where to Stream
+Comment=Global Streaming Availability for Movies and TV Shows
+Exec=/home/juwimana/.local/bin/trova %F
+Icon=trova
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;Network;
+StartupWMClass=trova
+Keywords=movie;film;streaming;netflix;prime;max;paramount;trova;cinema;where to watch;where to stream;

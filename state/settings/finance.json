@@ -1,0 +1,253 @@
+{
+  "watchlist": [
+    "GOOGL",
+    "NFLX",
+    "DIS",
+    "RDDT",
+    "SPY",
+    "QQQ",
+    "DIA",
+    "IWM",
+    "HYPE32196-USD",
+    "^VIX",
+    "WLD-USD",
+    "XLC",
+    "BTC-USD"
+  ],
+  "pinned": [
+    "GOOGL",
+    "NFLX",
+    "DIS",
+    "RDDT",
+    "SPY",
+    "QQQ",
+    "IWM",
+    "HYPE32196-USD",
+    "^VIX",
+    "DIA",
+    "WLD-USD",
+    "XLC",
+    "BTC-USD"
+  ],
+  "detailRange": "60",
+  "gridMode": "2+3",
+  "gridSync": {
+    "crosshair": false,
+    "symbol": true,
+    "time": false,
+    "timeframe": false
+  },
+  "gridSymbols": [
+    "IWM",
+    "IWM",
+    "IWM",
+    "IWM",
+    "IWM"
+  ],
+  "gridTimeframes": [
+    "30",
+    "60",
+    "1D",
+    "1W",
+    "1M"
+  ],
+  "gridZooms": [
+    23,
+    8,
+    33,
+    8,
+    8
+  ],
+  "gridSplits": {
+    "2x2": {
+      "colBotRatio": 0.5,
+      "colTopRatio": 0.5,
+      "rowRatio": 0.4776558052656546
+    },
+    "2+3": {
+      "colBotRatios": [
+        0.333,
+        0.333,
+        0.334
+      ],
+      "colTopRatio": 0.5,
+      "rowRatio": 0.4776558052656546
+    }
+  },
+  "layouts": {
+    "Crypto": {
+      "workspace": 2,
+      "windows": [
+        {
+          "symbol": "HYPE32196-USD",
+          "workspace": 2
+        },
+        {
+          "symbol": "BTC-USD",
+          "workspace": 2
+        }
+      ]
+    },
+    "Main": {
+      "workspace": 2,
+      "windows": [
+        {
+          "symbol": "SPY",
+          "workspace": 2,
+          "timeframes": [
+            "30",
+            "60",
+            "1D",
+            "1W",
+            "1M"
+          ],
+          "zooms": [
+            8,
+            8,
+            16,
+            11,
+            8
+          ],
+          "gridMode": "2+3"
+        },
+        {
+          "symbol": "QQQ",
+          "workspace": 2,
+          "timeframes": [
+            "30",
+            "60",
+            "1D",
+            "1W",
+            "1M"
+          ],
+          "zooms": [
+            8,
+            8,
+            8,
+            8,
+            8
+          ],
+          "gridMode": "2+3"
+        },
+        {
+          "symbol": "DIA",
+          "workspace": 2,
+          "timeframes": [
+            "30",
+            "60",
+            "1D",
+            "1W",
+            "1M"
+          ],
+          "zooms": [
+            8,
+            8,
+            8,
+            8,
+            8
+          ],
+          "gridMode": "2+3"
+        },
+        {
+          "symbol": "IWM",
+          "workspace": 2,
+          "timeframes": [
+            "30",
+            "60",
+            "1D",
+            "1W",
+            "1M"
+          ],
+          "zooms": [
+            23,
+            8,
+            33,
+            8,
+            8
+          ],
+          "gridMode": "2+3"
+        },
+        {
+          "symbol": "SMH",
+          "workspace": 2,
+          "timeframes": [
+            "30",
+            "60",
+            "1D",
+            "1W",
+            "1M"
+          ],
+          "zooms": [
+            8,
+            8,
+            8,
+            8,
+            8
+          ],
+          "gridMode": "2+3"
+        },
+        {
+          "symbol": "XLC",
+          "workspace": 2,
+          "timeframes": [
+            "30",
+            "60",
+            "1D",
+            "1W",
+            "1M"
+          ],
+          "zooms": [
+            8,
+            8,
+            8,
+            8,
+            21
+          ],
+          "gridMode": "2+3"
+        },
+        {
+          "symbol": "GOOGL",
+          "workspace": 2,
+          "timeframes": [
+            "30",
+            "60",
+            "1D",
+            "1W",
+            "1M"
+          ],
+          "zooms": [
+            10,
+            8,
+            8,
+            8,
+            15
+          ],
+          "gridMode": "2+3"
+        },
+        {
+          "symbol": "UVXY",
+          "workspace": 2,
+          "timeframes": [
+            "30",
+            "60",
+            "1D",
+            "1W",
+            "1M"
+          ],
+          "zooms": [
+            8,
+            8,
+            8,
+            8,
+            8
+          ],
+          "gridMode": "2+3"
+        }
+      ]
+    }
+  },
+  "breadthWeightMode": "cap",
+  "breadthSortTimeframe": "1W",
+  "breadthSortAsc": false,
+  "discordWebhook": "https://discord.com/api/webhooks/1555025989363310644/M0JepOpRsNNPbR_Ykk_-kgxc8plFo2Mfp7j0t_-Y7dv92osFqVITTKc5NcJ_qYA2v_TR"
+}
