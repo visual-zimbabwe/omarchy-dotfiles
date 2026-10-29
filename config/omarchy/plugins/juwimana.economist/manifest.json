@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "juwimana.economist",
-  "name": "The Economist",
-  "version": "1.0.0",
+  "name": "Magazine Covers",
+  "version": "1.1.0",
   "author": "juwimana",
   "license": "MIT",
-  "description": "The Economist weekly magazine cover illustration and editorial briefing HUD",
+  "description": "Weekly magazine cover artwork viewer for The Economist, The New Yorker, Barron's, and Newsweek",
   "kinds": [
     "bar-widget"
   ],
@@ -14,9 +14,9 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "The Economist",
-    "description": "Weekly cover illustration, cover story, and editorial briefings",
-    "category": "News",
+    "displayName": "Magazine Covers",
+    "description": "Browse the last 5 weekly covers for The Economist, The New Yorker, Barron's, and Newsweek",
+    "category": "Media",
     "allowMultiple": false,
     "defaultSection": "right"
   }

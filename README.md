@@ -37,7 +37,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/visual-zimbabwe/omarchy-dotf
 
 ### 2. 🧩 11 Custom & Curated Status Bar Plugins (`config/omarchy/plugins/`)
 * 🔒 **`juwimana.lock`**: Custom biometric and lock screen integration.
-* 📰 **`juwimana.economist`**: The Economist weekly magazine cover illustration and editorial briefing HUD.
+* 📰 **`juwimana.economist`**: Weekly magazine cover artwork viewer (The Economist, The New Yorker, Barron's, Newsweek).
 * 🏠 **`juwimana.surrey-rentals`**: Real-time rental tracker widget.
 * 🎴 **`yamz8.omanki`**: Interactive Anki flashcard reviewer on the status bar.
 * 🎬 **`alexzeitler.ytdlp`**: Instant YouTube and media downloader widget.
