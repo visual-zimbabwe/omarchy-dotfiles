@@ -54,10 +54,10 @@ def load_config() -> dict:
         return {}
 
 
-def download_image(url: str, dest_path: str) -> bool:
+def download_image(url: str, dest_path: str, force: bool = False) -> bool:
     if not url:
         return False
-    if os.path.exists(dest_path) and os.path.getsize(dest_path) > 1024:
+    if not force and os.path.exists(dest_path) and os.path.getsize(dest_path) > 1024:
         return True
     try:
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
@@ -73,7 +73,7 @@ def download_image(url: str, dest_path: str) -> bool:
     return False
 
 
-def get_economist_covers() -> list[dict]:
+def get_economist_covers(force: bool = False) -> list[dict]:
     url = "https://www.economist.com/printedition/rss.xml"
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     base_date = datetime.date(2026, 10, 31)
@@ -97,7 +97,7 @@ def get_economist_covers() -> list[dict]:
         iso = d.strftime("%Y-%m-%d")
         img_url = f"https://www.economist.com/cdn-cgi/image/width=1200,quality=85,format=auto/content-assets/images/{ymd}_DE_US.jpg"
         local_path = os.path.join(COVERS_DIR, f"economist_{ymd}.jpg")
-        has_local = download_image(img_url, local_path)
+        has_local = download_image(img_url, local_path, force=force)
 
         covers.append({
             "id": f"economist_{ymd}",
@@ -112,7 +112,7 @@ def get_economist_covers() -> list[dict]:
     return covers
 
 
-def get_barrons_covers() -> list[dict]:
+def get_barrons_covers(force: bool = False) -> list[dict]:
     covers = []
     try:
         req = urllib.request.Request("https://www.barrons.com/magazine/archives", headers={"User-Agent": USER_AGENT})
@@ -136,11 +136,14 @@ def get_barrons_covers() -> list[dict]:
                     lbl = d_str
                     ymd = f"item_{i}"
 
-                img_url = a.get("imageData", {}).get("imgUrl") or a.get("altSummaries", {}).get("Cover Image", {}).get("image") or ""
-                local_path = os.path.join(COVERS_DIR, f"barrons_{ymd}.jpg")
-                has_local = download_image(img_url, local_path)
+                cover_info = a.get("altSummaries", {}).get("Cover Image", {})
+                img_url = cover_info.get("image") or a.get("imageData", {}).get("imgUrl") or ""
 
-                headline = a.get("headline") or a.get("altSummaries", {}).get("Headline", {}).get("headline") or "Barron's Magazine"
+                local_path = os.path.join(COVERS_DIR, f"barrons_{ymd}.jpg")
+                has_local = download_image(img_url, local_path, force=force)
+
+                headline = cover_info.get("headline") or a.get("headline") or "Barron's Magazine"
+                headline = html_lib.unescape(headline.strip())
 
                 covers.append({
                     "id": f"barrons_{ymd}",
@@ -157,7 +160,7 @@ def get_barrons_covers() -> list[dict]:
     return covers
 
 
-def get_newyorker_covers() -> list[dict]:
+def get_newyorker_covers(force: bool = False) -> list[dict]:
     covers = []
     try:
         req = urllib.request.Request("https://www.newyorker.com/tag/covers", headers={"User-Agent": USER_AGENT})
@@ -191,7 +194,7 @@ def get_newyorker_covers() -> list[dict]:
 
             h = hashlib.md5(img_url.encode()).hexdigest()[:8]
             local_path = os.path.join(COVERS_DIR, f"newyorker_{h}.jpg")
-            has_local = download_image(img_url, local_path)
+            has_local = download_image(img_url, local_path, force=force)
 
             covers.append({
                 "id": f"newyorker_{h}",
@@ -210,7 +213,7 @@ def get_newyorker_covers() -> list[dict]:
     return covers
 
 
-def get_newsweek_covers() -> list[dict]:
+def get_newsweek_covers(force: bool = False) -> list[dict]:
     covers = []
     try:
         req = urllib.request.Request("https://www.newsweek.com/archive", headers={"User-Agent": USER_AGENT})
@@ -246,7 +249,7 @@ def get_newsweek_covers() -> list[dict]:
                 ymd = hashlib.md5(src.encode()).hexdigest()[:8]
 
             local_path = os.path.join(COVERS_DIR, f"newsweek_{ymd}.jpg")
-            has_local = download_image(src, local_path)
+            has_local = download_image(src, local_path, force=force)
 
             covers.append({
                 "id": f"newsweek_{ymd}",
@@ -281,10 +284,10 @@ def fetch_all_sources(force: bool = False) -> dict:
         except Exception:
             pass
 
-    economist_covers = get_economist_covers()
-    barrons_covers = get_barrons_covers()
-    newyorker_covers = get_newyorker_covers()
-    newsweek_covers = get_newsweek_covers()
+    economist_covers = get_economist_covers(force=force)
+    barrons_covers = get_barrons_covers(force=force)
+    newyorker_covers = get_newyorker_covers(force=force)
+    newsweek_covers = get_newsweek_covers(force=force)
 
     result = {
         "active_source": cfg.get("active_source", "economist"),
