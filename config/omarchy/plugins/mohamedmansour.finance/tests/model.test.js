@@ -1769,8 +1769,418 @@ test("evaluateStratChecklist enriches Rule 1 and checklist with HTF scenario ver
   assert.equal(res.isTradeable, true)
 })
 
+test("30m timeframe is supported across chartSpec, parseInterval, mergePeriodCandles, and formatCandleTime", () => {
+  assert.ok(Model.chartRanges().includes("30"))
+  assert.deepEqual(Model.chartSpec("30"), { range: "1mo", interval: "30m" })
+  assert.equal(Model.parseInterval("30"), "30")
+  assert.equal(Model.parseInterval("30m"), "30")
+  assert.equal(Model.parseInterval("30min"), "30")
+  assert.equal(Model.rangeCaption("30"), "30-Minute Candles (1 Month)")
 
+  // Verify 30m mergePeriodCandles merges trailing intra-bar snapshot tick without crossing 1800s boundaries
+  const baseTs = 1776864600 // 09:30 EDT
+  const raw30 = [
+    { timestamp: baseTs, open: 277.0, high: 278.2, low: 276.8, close: 278.0, volume: 120000 },
+    { timestamp: baseTs + 1800, open: 278.0, high: 279.0, low: 277.9, close: 278.5, volume: 95000 },
+    { timestamp: baseTs + 2400, open: 278.8, high: 278.8, low: 278.8, close: 278.8, volume: 0 }
+  ]
+  const merged = Model.mergePeriodCandles(raw30, "30")
+  assert.equal(merged.length, 2)
+  assert.equal(merged[1].timestamp, baseTs + 1800)
+  assert.equal(merged[1].close, 278.8)
+  assert.equal(merged[1].high, 279.0)
 
+  const formatted = Model.formatCandleTime(baseTs, "30")
+  assert.ok(formatted.includes(":30"))
+})
 
+test("HTF price levels cascade to LTF and anchor to the exact LTF bar that printed the HTF OHLC", () => {
+  // Visibility hierarchy: HTF shows on same and LTF, but not on higher TF
+  const lvl1D = { sourceTf: "1D", anchorTs: 1776864600, ohlcField: "high", price: 280.5 }
+  assert.equal(Model.isLevelVisibleOnTimeframe(lvl1D, "1W"), false)
+  assert.equal(Model.isLevelVisibleOnTimeframe(lvl1D, "1D"), true)
+  assert.equal(Model.isLevelVisibleOnTimeframe(lvl1D, "60"), true)
+  assert.equal(Model.isLevelVisibleOnTimeframe(lvl1D, "30"), true)
 
+  const lvl60 = { sourceTf: "60", anchorTs: 1776864600, ohlcField: "low", price: 276.2 }
+  assert.equal(Model.isLevelVisibleOnTimeframe(lvl60, "1D"), false)
+  assert.equal(Model.isLevelVisibleOnTimeframe(lvl60, "60"), true)
+  assert.equal(Model.isLevelVisibleOnTimeframe(lvl60, "30"), true)
+
+  // 30m bars across two hours of the same session (baseTs = 09:30 EDT)
+  const baseTs = 1776864600
+  const candles30 = [
+    { timestamp: baseTs - 86400, open: 274.0, high: 275.0, low: 273.5, close: 274.5 }, // [0] prior day
+    { timestamp: baseTs, open: 277.0, high: 278.2, low: 276.8, close: 278.0 },         // [1] 09:30 (1D Open)
+    { timestamp: baseTs + 1800, open: 278.0, high: 279.4, low: 276.2, close: 278.9 },  // [2] 10:00 (09:30 60m Low & High)
+    { timestamp: baseTs + 3600, open: 278.9, high: 280.5, low: 278.5, close: 280.1 },  // [3] 10:30 (1D High = 280.5)
+    { timestamp: baseTs + 5400, open: 280.1, high: 280.2, low: 279.0, close: 279.8 }   // [4] 11:00 (1D Close)
+  ]
+
+  // 1D High (280.5) was printed on 30m bar index 3 (10:30)
+  assert.equal(Model.resolveLevelAnchorIndex(lvl1D, candles30, "30"), 3)
+
+  // 1D Open was printed on 30m bar index 1 (09:30, first bar of session)
+  assert.equal(Model.resolveLevelAnchorIndex({ sourceTf: "1D", anchorTs: baseTs, ohlcField: "open", price: 277.0 }, candles30, "30"), 1)
+
+  // 1D Close was printed on 30m bar index 4 (11:00, last bar of session)
+  assert.equal(Model.resolveLevelAnchorIndex({ sourceTf: "1D", anchorTs: baseTs, ohlcField: "close", price: 279.8 }, candles30, "30"), 4)
+
+  // 60m bar at 09:30 (baseTs) spans [1] (09:30) and [2] (10:00); its Low (276.2) was printed on [2] (10:00)
+  assert.equal(Model.resolveLevelAnchorIndex(lvl60, candles30, "30"), 2)
+})
+
+test("parseState, serializeState, parseLayouts, and saveLayout persist rearranged cell timeframes and gridMode", () => {
+  const customTfs = ["30", "60", "1D", "1W", "1M"]
+  const layouts = Model.saveLayout({}, "morning-strat", [
+    { symbol: "IWM", workspace: 2, timeframes: customTfs, gridMode: "2+3" },
+    { symbol: "SPY", workspace: 2 }
+  ], 2)
+
+  assert.deepEqual(layouts["morning-strat"].windows[0], {
+    symbol: "IWM",
+    workspace: 2,
+    timeframes: customTfs,
+    gridMode: "2+3"
+  })
+  assert.deepEqual(layouts["morning-strat"].windows[1], {
+    symbol: "SPY",
+    workspace: 2
+  })
+
+  const rawState = Model.serializeState(
+    ["IWM", "SPY"],
+    ["IWM"],
+    "1D",
+    "2+3",
+    { symbol: true, timeframe: false, crosshair: true, time: true },
+    ["IWM", "IWM", "IWM", "IWM", "IWM"],
+    {},
+    layouts,
+    "equal",
+    "1Y",
+    false,
+    "",
+    customTfs
+  )
+  const parsed = Model.parseState(rawState)
+  assert.deepEqual(parsed.gridTimeframes, customTfs)
+  assert.deepEqual(parsed.layouts["morning-strat"].windows[0].timeframes, customTfs)
+  assert.equal(parsed.layouts["morning-strat"].windows[0].gridMode, "2+3")
+})
+
+test("buildReplayCandles, buildReplayQuote, and stepReplayCutoff exclude cutoff bar and reconstruct HTF bars", () => {
+  // Simulate IWM intraday session:
+  // Prior day: 2026-04-21 (1776778200 = 13:30 UTC / 06:30 PT)
+  // Current day: 2026-04-22 (1776864600 = 13:30 UTC / 06:30 PT)
+  const day1Open = 1776778200
+  const day2Open = 1776864600
+  const t0730 = day2Open + 3600   // 07:30 PT
+  const t0800 = day2Open + 5400   // 08:00 PT
+  const t0830 = day2Open + 7200   // 08:30 PT (cutoff: exclude 08:30 and later, leaving 08:00 at close)
+  const t0900 = day2Open + 9000   // 09:00 PT
+  const t0930 = day2Open + 10800  // 09:30 PT
+
+  const candles30 = [
+    { timestamp: day1Open, open: 274.0, high: 275.5, low: 273.5, close: 275.0, volume: 1000 },
+    { timestamp: day2Open, open: 276.0, high: 276.8, low: 275.8, close: 276.5, volume: 1200 }, // 06:30
+    { timestamp: day2Open + 1800, open: 276.5, high: 277.0, low: 276.0, close: 276.2, volume: 1100 }, // 07:00
+    { timestamp: t0730, open: 276.2, high: 277.5, low: 276.1, close: 277.4, volume: 1500 },    // 07:30
+    { timestamp: t0800, open: 277.4, high: 278.2, low: 277.2, close: 278.0, volume: 1800 },    // 08:00 (last included before 08:30)
+    { timestamp: t0830, open: 278.0, high: 279.6, low: 277.9, close: 279.4, volume: 2200 },    // 08:30 (excluded!)
+    { timestamp: t0900, open: 279.4, high: 280.5, low: 279.1, close: 280.2, volume: 2500 },    // 09:00 (excluded!)
+    { timestamp: t0930, open: 280.2, high: 281.0, low: 280.0, close: 280.8, volume: 1900 }     // 09:30 (excluded!)
+  ]
+
+  // 60m bars aligned on the hour (08:00 covers 08:00 and 08:30 30m bars)
+  const candles60 = [
+    { timestamp: day1Open, open: 274.0, high: 275.5, low: 273.5, close: 275.0, volume: 1000 },
+    { timestamp: day2Open, open: 276.0, high: 277.0, low: 275.8, close: 276.2, volume: 2300 },
+    { timestamp: t0730, open: 276.2, high: 277.5, low: 276.1, close: 277.4, volume: 1500 },
+    { timestamp: t0800, open: 277.4, high: 279.6, low: 277.2, close: 279.4, volume: 4000 }, // includes 08:30 spike to 279.6
+    { timestamp: t0900, open: 279.4, high: 281.0, low: 279.1, close: 280.8, volume: 4400 }
+  ]
+
+  const candles1D = [
+    { timestamp: day1Open, open: 274.0, high: 275.5, low: 273.5, close: 275.0, volume: 1000 },
+    { timestamp: day2Open, open: 276.0, high: 281.0, low: 275.8, close: 280.8, volume: 12200 } // full day high 281.0, close 280.8
+  ]
+
+  const candles1W = [
+    { timestamp: day1Open, open: 274.0, high: 281.0, low: 273.5, close: 280.8, volume: 13200 }
+  ]
+
+  // 1. 30m replay at cutoff = t0830 excludes t0830, t0900, t0930 and leaves t0800 at close (278.0)
+  const replay30 = Model.buildReplayCandles("30", candles30, candles30, candles60, candles1D, t0830)
+  assert.equal(replay30.length, 5)
+  assert.equal(replay30[replay30.length - 1].timestamp, t0800)
+  assert.equal(replay30[replay30.length - 1].close, 278.0)
+
+  // 2. 60m replay at cutoff = t0830 excludes t0900 and reconstructs t0800 60m bar using only the 08:00 30m bar
+  const replay60 = Model.buildReplayCandles("60", candles60, candles30, candles60, candles1D, t0830)
+  assert.equal(replay60.length, 4)
+  assert.equal(replay60[replay60.length - 1].timestamp, t0800)
+  assert.equal(replay60[replay60.length - 1].high, 278.2) // 08:30 spike to 279.6 excluded
+  assert.equal(replay60[replay60.length - 1].close, 278.0)
+
+  // 3. 1D replay at cutoff = t0830 reconstructs today's 1D bar up to 08:00 close (278.0, high 278.2)
+  const replay1D = Model.buildReplayCandles("1D", candles1D, candles30, candles60, candles1D, t0830)
+  assert.equal(replay1D.length, 2)
+  assert.equal(replay1D[1].open, 276.0)
+  assert.equal(replay1D[1].high, 278.2)
+  assert.equal(replay1D[1].low, 275.8)
+  assert.equal(replay1D[1].close, 278.0)
+
+  // 4. 1W replay at cutoff = t0830 combines Day 1 completed 1D bar + Day 2 pre-08:30 30m bars
+  const replay1W = Model.buildReplayCandles("1W", candles1W, candles30, candles60, candles1D, t0830)
+  assert.equal(replay1W.length, 1)
+  assert.equal(replay1W[0].open, 274.0)
+  assert.equal(replay1W[0].high, 278.2)
+  assert.equal(replay1W[0].low, 273.5)
+  assert.equal(replay1W[0].close, 278.0)
+
+  // 5. Synthetic replay quote reflects 08:00 close (278.0) and suppresses extended hours
+  const liveQuote = { symbol: "IWM", price: 280.8, regularPrice: 280.8, dayHigh: 281.0, dayLow: 275.8, hasExtended: true, extendedPrice: 281.5, session: "post" }
+  const replayQuote = Model.buildReplayQuote(liveQuote, candles30, candles60, candles1D, t0830)
+  assert.equal(replayQuote.price, 278.0)
+  assert.equal(replayQuote.regularPrice, 278.0)
+  assert.equal(replayQuote.hasExtended, false)
+  assert.equal(replayQuote.session, "regular")
+
+  // 6. Stepping backward (-1) from t0830 moves cutoff to t0800; stepping forward (+1) moves to t0900
+  assert.equal(Model.stepReplayCutoff(candles30, t0830, -1), t0800)
+  assert.equal(Model.stepReplayCutoff(candles30, t0830, 1), t0900)
+  assert.equal(Model.stepReplayCutoff(candles30, t0930, 1), 0) // stepping past last bar exits replay
+})
+
+test("parseState, serializeState, parseLayouts, and saveLayout persist per-cell zoom counts", () => {
+  const customTfs = ["30", "60", "1D", "1W", "1M"]
+  const customZooms = [8, 8, 16, 11, 8]
+  const layouts = Model.saveLayout({}, "Main", [
+    { symbol: "SPY", workspace: 2, timeframes: customTfs, zooms: customZooms, gridMode: "2+3" },
+    { symbol: "QQQ", workspace: 2, timeframes: customTfs, zooms: [8, 8, 8, 8, 8], gridMode: "2+3" }
+  ], 2)
+
+  const raw = Model.serializeState(
+    ["SPY", "QQQ"],
+    ["SPY"],
+    "1D",
+    "2+3",
+    { symbol: true, timeframe: false, crosshair: true, time: true },
+    ["SPY", "SPY", "SPY", "SPY", "SPY"],
+    {},
+    layouts,
+    "equal",
+    "1Y",
+    false,
+    "",
+    customTfs,
+    [8, 8, 8, 8, 8]
+  )
+  const parsed = Model.parseState(raw)
+  assert.deepEqual(parsed.gridZooms, [8, 8, 8, 8, 8])
+  assert.deepEqual(parsed.layouts.Main.windows[0].zooms, [8, 8, 16, 11, 8])
+  assert.deepEqual(parsed.layouts.Main.windows[1].zooms, [8, 8, 8, 8, 8])
+})
+
+test("computeStratBinaryDetails detects 1-2-2 RevStrats with T1 inside and T2 mother targets while excluding 2-2 continuations", () => {
+  // Bullish 1-2d-2u RevStrat (modeled on IWM Oct 29, 2026 07:00 PT 5m Trade 4):
+  // p3 (Mother): H 284.33, L 283.15
+  // p2 (Inside 1): H 284.26, L 283.79
+  // p1 (2d): H 284.24, L 283.64
+  // cur (2u): triggers above 284.24, T1 = 284.26 (Inside), T2 = 284.33 (Mother governs mBit)
+  const bullRevCandles = [
+    { open: 283.30, high: 284.33, low: 283.15, close: 284.10 }, // p3 Mother
+    { open: 284.10, high: 284.26, low: 283.79, close: 283.95 }, // p2 Inside (1)
+    { open: 283.95, high: 284.24, low: 283.64, close: 283.80 }, // p1 2d
+    { open: 283.82, high: 284.28, low: 283.80, close: 284.28 }  // cur 2u (T1 284.26 hit, T2 284.33 open)
+  ]
+
+  const bullOpen = Model.computeStratBinaryDetails(bullRevCandles)
+  assert.equal(bullOpen.signalType, "1-2d-2u Bullish RevStrat")
+  assert.equal(bullOpen.bits, "111111")
+  assert.equal(bullOpen.color, "green")
+  assert.equal(bullOpen.isBullish, true)
+  assert.equal(bullOpen.t1Price, 284.26)
+  assert.equal(bullOpen.targetPrice, 284.33)
+  assert.match(bullOpen.tooltip, /T1 \(Inside\): \$284\.26 \(Hit\)/)
+  assert.match(bullOpen.tooltip, /T2 \(Mother\): \$284\.33 \(Open\)/)
+
+  // Once T2 Mother bar high (284.33) is reached, mBit flips to 0 (amber / exhausted)
+  const bullHit = Model.computeStratBinaryDetails(bullRevCandles, { price: 284.72 })
+  assert.equal(bullHit.signalType, "1-2d-2u Bullish RevStrat")
+  assert.equal(bullHit.bits, "111110")
+  assert.equal(bullHit.color, "amber")
+  assert.match(bullHit.tooltip, /T2 \(Mother\): \$284\.33 \(Hit\)/)
+
+  // Bearish 1-2u-2d RevStrat:
+  // p3 (Mother): H 110, L 100
+  // p2 (Inside 1): H 108, L 103
+  // p1 (2u): H 109, L 104
+  // cur (2d): triggers below 104, T1 = 103 (Inside), T2 = 100 (Mother governs mBit)
+  const bearRevCandles = [
+    { open: 109, high: 110, low: 100, close: 105 }, // p3 Mother
+    { open: 105, high: 108, low: 103, close: 106 }, // p2 Inside (1)
+    { open: 106, high: 109, low: 104, close: 108 }, // p1 2u
+    { open: 107, high: 107.5, low: 102.5, close: 102.5 } // cur 2d (T1 103 hit, T2 100 open)
+  ]
+
+  const bearOpen = Model.computeStratBinaryDetails(bearRevCandles)
+  assert.equal(bearOpen.signalType, "1-2u-2d Bearish RevStrat")
+  assert.equal(bearOpen.bits, "001111")
+  assert.equal(bearOpen.color, "red")
+  assert.equal(bearOpen.isBullish, false)
+  assert.equal(bearOpen.t1Price, 103)
+  assert.equal(bearOpen.targetPrice, 100)
+  assert.match(bearOpen.tooltip, /T1 \(Inside\): \$103\.00 \(Hit\)/)
+  assert.match(bearOpen.tooltip, /T2 \(Mother\): \$100\.00 \(Open\)/)
+
+  const bearHit = Model.computeStratBinaryDetails(bearRevCandles, { price: 99.5 })
+  assert.equal(bearHit.bits, "001110")
+  assert.equal(bearHit.color, "amber")
+  assert.match(bearHit.tooltip, /T2 \(Mother\): \$100\.00 \(Hit\)/)
+
+  // Plain 2d-2u (when p2 is NOT an inside bar) remains "2d-2u Bullish Reversal" targeting p2.high
+  const plain22Candles = [
+    { open: 105, high: 106, low: 100, close: 104 },
+    { open: 104, high: 108, low: 101, close: 107 }, // p2 is 2u (not 1)
+    { open: 107, high: 107.5, low: 100.5, close: 101 }, // p1 is 2d
+    { open: 101.5, high: 107.8, low: 101.2, close: 107.8 } // cur is 2u
+  ]
+  const plain22 = Model.computeStratBinaryDetails(plain22Candles)
+  assert.equal(plain22.signalType, "2d-2u Bullish Reversal")
+  assert.equal(plain22.t1Price, null)
+  assert.equal(plain22.targetPrice, 108)
+
+  // 2-2 Continuations (2u-2u and 2d-2d) remain excluded (sBit = "0", signalType = null, color = "muted")
+  const cont2u2u = Model.computeStratBinaryDetails([
+    { open: 100, high: 104, low: 99, close: 103 },
+    { open: 103, high: 106, low: 101, close: 105 }, // p1 2u
+    { open: 105, high: 109, low: 104, close: 108 }  // cur 2u
+  ])
+  assert.equal(cont2u2u.signalType, null)
+  assert.equal(cont2u2u.bits, "110000")
+  assert.equal(cont2u2u.color, "muted")
+
+  const cont2d2d = Model.computeStratBinaryDetails([
+    { open: 108, high: 109, low: 104, close: 105 },
+    { open: 105, high: 106, low: 101, close: 102 }, // p1 2d
+    { open: 102, high: 103, low: 98, close: 99 }    // cur 2d
+  ])
+  assert.equal(cont2d2d.signalType, null)
+  assert.equal(cont2d2d.bits, "000000")
+  assert.equal(cont2d2d.color, "muted")
+})
+
+test("evaluateStratChecklist and resolveUntaggedHtfTargets scan lookback 1D/1W swing pivots and WTD/MTD extremes on gap opens", () => {
+  const ts = (iso) => Math.floor(new Date(iso).getTime() / 1000)
+
+  // Bullish gap-up scenario modeled on IWM Oct 29, 2026:
+  // - Sep 2026 macro high: 296.18 (1M High)
+  // - Sep 22 swing pivot high: 288.94 (left neighbor Sep 21 high 285.10 <= 288.94 -> true pivot)
+  // - Sep 23 step-down cascade bar: 286.18 (left neighbor Sep 22 high 288.94 > 286.18 -> NOT a pivot, filtered out!)
+  // - Oct 6 swing pivot high: 284.64 (confluent 1D Pivot + Oct 5 1W Pivot + Oct MTD High)
+  // - Prior week (Oct 19-23) high: 277.70 (1W High — gapped over)
+  // - Prior day (Oct 28) high: 281.48 (1D High — gapped over)
+  // - Today (Oct 29) gaps open at 282.41; 07:00 PT 60m opens at 283.82 and trades at 284.34 before tagging 284.64
+  const daily = [
+    { timestamp: ts("2026-09-15T13:30:00Z"), open: 290.00, high: 296.18, low: 287.00, close: 292.00 },
+    { timestamp: ts("2026-09-21T13:30:00Z"), open: 283.00, high: 285.10, low: 281.00, close: 284.50 },
+    { timestamp: ts("2026-09-22T13:30:00Z"), open: 284.50, high: 288.94, low: 284.00, close: 287.80 },
+    { timestamp: ts("2026-09-23T13:30:00Z"), open: 287.00, high: 286.18, low: 280.00, close: 281.00 },
+    { timestamp: ts("2026-09-29T13:30:00Z"), open: 280.50, high: 281.50, low: 277.00, close: 279.50 },
+    { timestamp: ts("2026-10-05T13:30:00Z"), open: 280.00, high: 282.50, low: 278.00, close: 282.00 },
+    { timestamp: ts("2026-10-06T13:30:00Z"), open: 282.00, high: 284.64, low: 279.00, close: 280.50 },
+    { timestamp: ts("2026-10-07T13:30:00Z"), open: 280.50, high: 281.20, low: 276.00, close: 277.00 },
+    { timestamp: ts("2026-10-20T13:30:00Z"), open: 274.00, high: 277.70, low: 272.00, close: 276.00 },
+    { timestamp: ts("2026-10-27T13:30:00Z"), open: 276.50, high: 279.80, low: 275.50, close: 279.00 },
+    { timestamp: ts("2026-10-28T13:30:00Z"), open: 279.00, high: 281.48, low: 278.10, close: 281.10 },
+    { timestamp: ts("2026-10-29T13:30:00Z"), open: 282.41, high: 284.36, low: 282.20, close: 284.34 }
+  ]
+
+  const hourlyAt0701 = [
+    { timestamp: ts("2026-10-28T19:30:00Z"), open: 280.20, high: 281.39, low: 279.90, close: 281.10 },
+    { timestamp: ts("2026-10-29T13:30:00Z"), open: 282.41, high: 284.33, low: 282.20, close: 283.80 }, // 06:30 PT 60m
+    { timestamp: ts("2026-10-29T14:00:00Z"), open: 283.82, high: 284.36, low: 283.80, close: 284.34 }  // 07:00 PT 60m
+  ]
+
+  // 1. Before 284.64 is tagged: locks 284.64 ("1D/1W Pivot High"), skips gapped-over 281.48 & non-pivot 286.18
+  const preHit = Model.evaluateStratChecklist(
+    "IWM",
+    hourlyAt0701,
+    daily,
+    { regularMarketPrice: 284.34, dayHigh: 284.36, dayLow: 282.20 },
+    new Date("2026-10-29T14:01:00Z")
+  )
+  assert.equal(preHit.direction, "LONG")
+  assert.equal(preHit.targetName, "1D/1W Pivot High")
+  assert.equal(preHit.targetPrice, 284.64)
+  assert.equal(preHit.isTargetHit, false)
+  assert.equal(preHit.isTradeable, true)
+  assert.deepEqual(
+    preHit.targets.map(t => `${t.name}: $${t.price.toFixed(2)}`),
+    [
+      "1D/1W Pivot High: $284.64",
+      "1D Pivot High: $288.94",
+      "1M High: $296.18"
+    ]
+  )
+
+  // 2. Mid-candle when price surges through 284.64 to 284.72: target stays locked on 284.64 and flips isTargetHit = true
+  const midCandleHit = Model.evaluateStratChecklist(
+    "IWM",
+    hourlyAt0701,
+    daily,
+    { regularMarketPrice: 284.72, dayHigh: 284.76, dayLow: 282.20 },
+    new Date("2026-10-29T14:04:00Z")
+  )
+  assert.equal(midCandleHit.targetName, "1D/1W Pivot High")
+  assert.equal(midCandleHit.targetPrice, 284.64)
+  assert.equal(midCandleHit.isTargetHit, true)
+  assert.equal(midCandleHit.isTradeable, false)
+  assert.match(midCandleHit.statusTag, /TARGET HIT \(1D\/1W Pivot High\)/)
+
+  // 3. Next 60m bar after prior closed 60m bar swept 284.91: retires 284.64 and advances T1 to 288.94
+  const hourlyNextBar = [
+    hourlyAt0701[1],
+    { timestamp: ts("2026-10-29T14:00:00Z"), open: 283.82, high: 284.91, low: 283.80, close: 284.80 },
+    { timestamp: ts("2026-10-29T15:00:00Z"), open: 284.80, high: 285.10, low: 284.70, close: 285.05 }
+  ]
+  const dailyUpdated = daily.slice(0, -1).concat([
+    { timestamp: ts("2026-10-29T13:30:00Z"), open: 282.41, high: 285.10, low: 282.20, close: 285.05 }
+  ])
+  const nextBarRes = Model.evaluateStratChecklist(
+    "IWM",
+    hourlyNextBar,
+    dailyUpdated,
+    { regularMarketPrice: 285.05, dayHigh: 285.10, dayLow: 282.20 },
+    new Date("2026-10-29T15:05:00Z")
+  )
+  assert.equal(nextBarRes.targetName, "1D Pivot High")
+  assert.equal(nextBarRes.targetPrice, 288.94)
+  assert.equal(nextBarRes.isTargetHit, false)
+
+  // 4. Bearish gap-down mirror via resolveUntaggedHtfTargets: resolves lookback 1D & 1D/1W Pivot Lows + WTD Low
+  const bearDaily = [
+    { timestamp: ts("2026-09-14T13:30:00Z"), open: 105, high: 108, low: 92.50, close: 96 }, // 1M Low 92.50
+    { timestamp: ts("2026-09-28T13:30:00Z"), open: 101, high: 103, low: 99.00, close: 100 }, // Prior week neighbor (low 99.00 >= 96.25)
+    { timestamp: ts("2026-10-05T13:30:00Z"), open: 104, high: 106, low: 101.00, close: 102 },
+    { timestamp: ts("2026-10-06T13:30:00Z"), open: 102, high: 103, low: 96.25, close: 99 },  // 1D/1W Pivot Low 96.25
+    { timestamp: ts("2026-10-20T13:30:00Z"), open: 105, high: 107, low: 102.00, close: 104 }, // Prior 1W Low 102.00 (gapped below)
+    { timestamp: ts("2026-10-27T13:30:00Z"), open: 103, high: 104, low: 98.40, close: 101 },  // Current week Tue 1D Pivot / WTD Low 98.40
+    { timestamp: ts("2026-10-28T13:30:00Z"), open: 101, high: 102, low: 100.20, close: 100.5 }, // Prior 1D Low 100.20 (gapped below)
+    { timestamp: ts("2026-10-29T13:30:00Z"), open: 99.50, high: 99.60, low: 99.10, close: 99.20 }
+  ]
+  const bearWeekly = Model.mergePeriodCandles(bearDaily, "1W")
+  const bearMonthly = Model.mergePeriodCandles(bearDaily, "1M")
+  const bearTargets = Model.resolveUntaggedHtfTargets(false, "60", bearDaily, bearWeekly, bearMonthly, 99.50, null)
+  assert.deepEqual(
+    bearTargets.map(t => ({ name: t.name, price: t.price })),
+    [
+      { name: "1D Pivot Low", price: 98.40 },
+      { name: "1D/1W Pivot Low", price: 96.25 },
+      { name: "1M Low", price: 92.50 }
+    ]
+  )
+})
 

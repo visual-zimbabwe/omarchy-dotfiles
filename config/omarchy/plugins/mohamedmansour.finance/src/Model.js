@@ -40,6 +40,28 @@ function finiteOrNull(value) {
   return isFinite(n) ? n : null
 }
 
+function normalizeTimeframeList(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) return null
+  var valid = ["30", "60", "1D", "1W", "1M", "1Y", "All"]
+  var out = []
+  for (var i = 0; i < raw.length; i++) {
+    var tf = String(raw[i] || "").replace(/^\s+|\s+$/g, "")
+    if (valid.indexOf(tf) !== -1) out.push(tf)
+  }
+  return out.length > 0 ? out : null
+}
+
+function normalizeZoomList(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) return null
+  var out = []
+  for (var i = 0; i < raw.length; i++) {
+    var n = parseInt(raw[i], 10)
+    if (isFinite(n) && n >= 8) out.push(n)
+    else out.push(-1)
+  }
+  return out.length > 0 ? out : null
+}
+
 function parseLayouts(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {}
   var out = {}
@@ -58,10 +80,18 @@ function parseLayouts(raw) {
         } else if (w && typeof w === "object") {
           var s = normalizeSymbol(w.symbol)
           if (s) {
-            windows.push({
+            var winObj = {
               symbol: s,
               workspace: (w.workspace !== undefined && w.workspace !== null) ? w.workspace : ws
-            })
+            }
+            var tfs = normalizeTimeframeList(w.timeframes)
+            if (tfs) winObj.timeframes = tfs
+            var zs = normalizeZoomList(w.zooms)
+            if (zs) winObj.zooms = zs
+            if (w.gridMode === "2x2" || w.gridMode === "2+3" || w.gridMode === "1x1") {
+              winObj.gridMode = w.gridMode
+            }
+            windows.push(winObj)
           }
         }
       }
@@ -91,10 +121,18 @@ function saveLayout(layouts, name, windows, defaultWorkspace) {
       } else if (w && typeof w === "object") {
         var s = normalizeSymbol(w.symbol)
         if (s) {
-          list.push({
+          var savedWin = {
             symbol: s,
             workspace: (w.workspace !== undefined && w.workspace !== null) ? w.workspace : ws
-          })
+          }
+          var tfs = normalizeTimeframeList(w.timeframes)
+          if (tfs) savedWin.timeframes = tfs
+          var zs = normalizeZoomList(w.zooms)
+          if (zs) savedWin.zooms = zs
+          if (w.gridMode === "2x2" || w.gridMode === "2+3" || w.gridMode === "1x1") {
+            savedWin.gridMode = w.gridMode
+          }
+          list.push(savedWin)
         }
       }
     }
@@ -153,6 +191,10 @@ function parseState(raw) {
       }
       res.gridSymbols = gSymbols
     }
+    var gTimeframes = normalizeTimeframeList(data.gridTimeframes)
+    if (gTimeframes) res.gridTimeframes = gTimeframes
+    var gZooms = normalizeZoomList(data.gridZooms)
+    if (gZooms) res.gridZooms = gZooms
     if (data.gridSplits !== undefined && typeof data.gridSplits === "object") res.gridSplits = data.gridSplits
     if (data.layouts !== undefined && typeof data.layouts === "object") res.layouts = parseLayouts(data.layouts)
     if (data.breadthWeightMode === "cap" || data.breadthWeightMode === "equal") res.breadthWeightMode = data.breadthWeightMode
@@ -165,7 +207,7 @@ function parseState(raw) {
   }
 }
 
-function serializeState(watchlist, pinned, detailRange, gridMode, gridSync, gridSymbols, gridSplits, layouts, breadthWeightMode, breadthSortTimeframe, breadthSortAsc, discordWebhook) {
+function serializeState(watchlist, pinned, detailRange, gridMode, gridSync, gridSymbols, gridSplits, layouts, breadthWeightMode, breadthSortTimeframe, breadthSortAsc, discordWebhook, gridTimeframes, gridZooms) {
   var list = Array.isArray(watchlist) ? watchlist.slice() : []
   var obj = {
     watchlist: list,
@@ -175,6 +217,10 @@ function serializeState(watchlist, pinned, detailRange, gridMode, gridSync, grid
   if (gridMode !== undefined) obj.gridMode = gridMode
   if (gridSync !== undefined) obj.gridSync = gridSync
   if (gridSymbols !== undefined) obj.gridSymbols = gridSymbols
+  var normTfs = normalizeTimeframeList(gridTimeframes)
+  if (normTfs) obj.gridTimeframes = normTfs
+  var normZooms = normalizeZoomList(gridZooms)
+  if (normZooms) obj.gridZooms = normZooms
   if (gridSplits !== undefined) obj.gridSplits = gridSplits
   if (layouts !== undefined && layouts !== null && Object.keys(layouts).length > 0) obj.layouts = parseLayouts(layouts)
   if (breadthWeightMode !== undefined) obj.breadthWeightMode = breadthWeightMode
@@ -274,7 +320,7 @@ function quoteSymbolsForView(watchlist, detailSymbol, view) {
 }
 
 function chartRanges() {
-  return ["60", "1D", "1W", "1M", "1Y"]
+  return ["30", "60", "1D", "1W", "1M", "1Y"]
 }
 
 function normalizeRange(value) {
@@ -285,6 +331,7 @@ function normalizeRange(value) {
 
 function chartSpec(range) {
   switch (String(range || "1D")) {
+    case "30": return { range: "1mo", interval: "30m" }
     case "60": return { range: "1mo", interval: "60m" }
     case "1W": return { range: "5y", interval: "1wk" }
     case "1M": return { range: "10y", interval: "1mo" }
@@ -377,8 +424,8 @@ function yahooChartUrl(symbol, rangeKey) {
 function chartUrl(symbol, rangeKey) {
   var sym = normalizeSymbol(symbol)
   var rk = String(rangeKey || "1D")
-  if (isCoinbaseCryptoSymbol(sym) && (rk === "60" || rk === "1D" || rk === "1W")) {
-    var gran = (rk === "60") ? "3600" : "86400"
+  if (isCoinbaseCryptoSymbol(sym) && (rk === "30" || rk === "60" || rk === "1D" || rk === "1W")) {
+    var gran = (rk === "30") ? "1800" : ((rk === "60") ? "3600" : "86400")
     return "https://api.exchange.coinbase.com/products/" + encodeURIComponent(sym) + "/candles?granularity=" + gran
   }
   return yahooChartUrl(sym, rk)
@@ -387,10 +434,10 @@ function chartUrl(symbol, rangeKey) {
 function chartCommand(symbol, rangeKey) {
   var sym = normalizeSymbol(symbol)
   var rk = String(rangeKey || "1D")
-  if (isHyperliquidCryptoSymbol(sym) && (rk === "60" || rk === "1D" || rk === "1W")) {
+  if (isHyperliquidCryptoSymbol(sym) && (rk === "30" || rk === "60" || rk === "1D" || rk === "1W")) {
     var coin = cryptoBaseSymbol(sym)
-    var interval = (rk === "60") ? "1h" : "1d"
-    var lookbackDays = (rk === "60") ? 30 : 400
+    var interval = (rk === "30") ? "30m" : ((rk === "60") ? "1h" : "1d")
+    var lookbackDays = (rk === "30" || rk === "60") ? 30 : 400
     var startTime = Date.now() - (lookbackDays * 86400000)
     var payload = JSON.stringify({
       type: "candleSnapshot",
@@ -453,6 +500,7 @@ function sessionFromMeta(meta) {
 
 function rangeCaption(rangeKey, quote) {
   switch (String(rangeKey || "1D")) {
+    case "30": return "30-Minute Candles (1 Month)"
     case "60": return "60-Minute Candles (1 Month)"
     case "1D": return "1-Day Candles (1 Year)"
     case "1W": return "1-Week Candles (5 Years)"
@@ -579,7 +627,7 @@ function mergePeriodCandles(candles, rangeKey) {
         && d1d.getUTCDate() === d2d.getUTCDate()
     }
 
-    if (range === "60") {
+    if (range === "60" || range === "30") {
       var d1h = new Date(t1 * 1000)
       var d2h = new Date(t2 * 1000)
       if (d1h.getUTCFullYear() !== d2h.getUTCFullYear() ||
@@ -587,8 +635,15 @@ function mergePeriodCandles(candles, rangeKey) {
           d1h.getUTCDate() !== d2h.getUTCDate()) {
         return false
       }
-      var offsetSec = t1 % 3600
-      return Math.floor((t1 - offsetSec) / 3600) === Math.floor((t2 - offsetSec) / 3600)
+      var bucketSec = range === "30" ? 1800 : 3600
+      var offsetSec = t1 % bucketSec
+      if (Math.floor((t1 - offsetSec) / bucketSec) === Math.floor((t2 - offsetSec) / bucketSec)) {
+        return true
+      }
+      if (range === "30" && (t2 - t1 === 1800) && !c2.volume) {
+        return true
+      }
+      return false
     }
 
     return false
@@ -1463,7 +1518,7 @@ function formatCandleTime(timestamp, rangeKey) {
   var mStr = (minutes < 10 ? "0" : "") + minutes
   var timeStr = h12 + ":" + mStr + " " + ampm
 
-  if (range === "60") {
+  if (range === "60" || range === "30") {
     var mon60 = months[d.getMonth()]
     var day60 = d.getDate()
     var year60 = d.getFullYear()
@@ -1487,7 +1542,7 @@ function formatTimeAxisLabel(timestamp, rangeKey, prevTimestamp) {
   var h12 = hours % 12 || 12
   var mStr = (minutes < 10 ? "0" : "") + minutes
 
-  if (range === "60") {
+  if (range === "60" || range === "30") {
     var isNewDay = !prevD || d.getDate() !== prevD.getDate() || d.getMonth() !== prevD.getMonth() || d.getFullYear() !== prevD.getFullYear()
     if (isNewDay) return months[d.getMonth()] + " " + d.getDate()
     return h12 + ":" + mStr + " " + ampm
@@ -1847,11 +1902,13 @@ function computeStratBinaryDetails(candles, liveQuote) {
   var curClose = Number(cur.close)
   if (liveQuote && isFinite(Number(liveQuote.price))) {
     curClose = Number(liveQuote.price)
+    if (curClose > curHigh) curHigh = curClose
+    if (curClose < curLow) curLow = curClose
     if (isFinite(Number(liveQuote.dayHigh)) && Number(liveQuote.dayHigh) > curHigh) curHigh = Number(liveQuote.dayHigh)
     if (isFinite(Number(liveQuote.dayLow)) && Number(liveQuote.dayLow) < curLow) curLow = Number(liveQuote.dayLow)
   }
 
-  var sc_cur = stratScenario(cur, p1)
+  var sc_cur = stratScenario({ high: curHigh, low: curLow }, p1)
   var sc_p1 = p2 ? stratScenario(p1, p2) : "-"
   var sc_p2 = (p2 && p3) ? stratScenario(p2, p3) : "-"
 
@@ -1866,10 +1923,23 @@ function computeStratBinaryDetails(candles, liveQuote) {
   // 3. Signal
   var sBit = "0"
   var signalType = null
+  var t1Price = null
   var targetPrice = null
   var isBullish = false
 
-  if (sc_p1 === "2d" && sc_cur === "2u") {
+  if (sc_p2 === "1" && sc_p1 === "2d" && sc_cur === "2u") {
+    sBit = "1"
+    signalType = "1-2d-2u Bullish RevStrat"
+    isBullish = true
+    t1Price = p2 ? Number(p2.high) : null
+    targetPrice = p3 ? Number(p3.high) : t1Price
+  } else if (sc_p2 === "1" && sc_p1 === "2u" && sc_cur === "2d") {
+    sBit = "1"
+    signalType = "1-2u-2d Bearish RevStrat"
+    isBullish = false
+    t1Price = p2 ? Number(p2.low) : null
+    targetPrice = p3 ? Number(p3.low) : t1Price
+  } else if (sc_p1 === "2d" && sc_cur === "2u") {
     sBit = "1"
     signalType = "2d-2u Bullish Reversal"
     isBullish = true
@@ -1899,7 +1969,7 @@ function computeStratBinaryDetails(candles, liveQuote) {
       sBit = "1"
       signalType = "2d-1-2d Bearish Continuation"
       isBullish = false
-      targetPrice = p3 ? Number(p3.low) : (p2 ? Number(p2.low) : null)
+      targetPrice = p3 ? Number(p3.low) : (p2 ? Number(p3.low) : null)
     }
   }
 
@@ -1958,8 +2028,12 @@ function computeStratBinaryDetails(candles, liveQuote) {
   if (signalType) {
     ttLines.push("• Setup: " + signalType)
     ttLines.push("• Status: " + statusDesc)
-    if (isFinite(targetPrice)) {
-      ttLines.push("• Target: $" + targetPrice.toFixed(2) + (mBit === "0" ? " (Hit)" : " (Open)"))
+    if (t1Price !== null && isFinite(t1Price) && isFinite(targetPrice)) {
+      var hitT1 = tBit === "1" && (isBullish ? (curHigh >= t1Price) : (curLow <= t1Price))
+      ttLines.push("• T1 (Inside): $" + t1Price.toFixed(2) + (hitT1 ? " (Hit)" : " (Open)"))
+      ttLines.push("• T2 (Mother): $" + targetPrice.toFixed(2) + (mBit === "0" && tBit === "1" ? " (Hit)" : " (Open)"))
+    } else if (isFinite(targetPrice)) {
+      ttLines.push("• Target: $" + targetPrice.toFixed(2) + (mBit === "0" && tBit === "1" ? " (Hit)" : " (Open)"))
     }
   }
   var tooltip = ttLines.join("\n")
@@ -1970,7 +2044,9 @@ function computeStratBinaryDetails(candles, liveQuote) {
     tooltip: tooltip,
     isBullish: isBullish,
     signalType: signalType,
-    statusDesc: statusDesc
+    statusDesc: statusDesc,
+    t1Price: (t1Price !== null && isFinite(t1Price)) ? t1Price : null,
+    targetPrice: (targetPrice !== null && isFinite(targetPrice)) ? targetPrice : null
   }
 }
 
@@ -2111,6 +2187,15 @@ function parseInterval(query) {
   if (!query || typeof query !== "string") return null
   var q = query.trim().toUpperCase().replace(/^[^0-9A-Z]+/, "").replace(/[^0-9A-Z]+$/, "")
   if (!q) return null
+
+  if (
+    q === "30" ||
+    q === "30M" ||
+    q === "30MIN" ||
+    q === "30MINS"
+  ) {
+    return "30"
+  }
 
   if (
     q === "60" ||
@@ -3209,6 +3294,303 @@ function resolveDominoHtfSignal(tfLabel, isLong, candles) {
   }
 }
 
+function resolveUntaggedHtfTargets(isLong, setupTf, daily, weekly, monthly, entryBaseline, priorTodayExtreme) {
+  var dList = Array.isArray(daily) ? daily : []
+  var wList = Array.isArray(weekly) ? weekly : []
+  var mList = Array.isArray(monthly) ? monthly : []
+
+  var bound = finiteOrNull(entryBaseline)
+  var todayExt = finiteOrNull(priorTodayExtreme)
+  if (todayExt !== null) {
+    if (bound === null) {
+      bound = todayExt
+    } else if (isLong && todayExt > bound) {
+      bound = todayExt
+    } else if (!isLong && todayExt < bound) {
+      bound = todayExt
+    }
+  }
+  if (bound === null) return []
+
+  var p1D = dList.length > 1 ? dList[dList.length - 2] : null
+  var c1D = dList.length > 0 ? dList[dList.length - 1] : null
+  var p1W = wList.length > 1 ? wList[wList.length - 2] : null
+  var p1M = mList.length > 1 ? mList[mList.length - 2] : null
+
+  var closedDaily = dList.length > 1 ? dList.slice(0, dList.length - 1) : []
+  var closedWeekly = wList.length > 1 ? wList.slice(0, wList.length - 1) : []
+
+  var priorWtdExtreme = null
+  var priorMtdExtreme = null
+  if (c1D && isFinite(c1D.timestamp) && c1D.timestamp >= 86400 * 7) {
+    var curWeekStart = periodStartUtc(c1D.timestamp, "1W")
+    var curMonthStart = periodStartUtc(c1D.timestamp, "1M")
+    for (var pi = 0; pi < closedDaily.length; pi++) {
+      var pc = closedDaily[pi]
+      if (!pc || !isFinite(pc.timestamp)) continue
+      var pVal = isLong ? Number(pc.high) : Number(pc.low)
+      if (!isFinite(pVal)) continue
+      if (periodStartUtc(pc.timestamp, "1W") === curWeekStart) {
+        if (priorWtdExtreme === null || (isLong ? pVal > priorWtdExtreme : pVal < priorWtdExtreme)) {
+          priorWtdExtreme = pVal
+        }
+      }
+      if (periodStartUtc(pc.timestamp, "1M") === curMonthStart) {
+        if (priorMtdExtreme === null || (isLong ? pVal > priorMtdExtreme : pVal < priorMtdExtreme)) {
+          priorMtdExtreme = pVal
+        }
+      }
+    }
+  }
+
+  var wBound = bound
+  if (priorWtdExtreme !== null) {
+    if (isLong && priorWtdExtreme > wBound) wBound = priorWtdExtreme
+    if (!isLong && priorWtdExtreme < wBound) wBound = priorWtdExtreme
+  }
+  var mBound = bound
+  if (priorMtdExtreme !== null) {
+    if (isLong && priorMtdExtreme > mBound) mBound = priorMtdExtreme
+    if (!isLong && priorMtdExtreme < mBound) mBound = priorMtdExtreme
+  }
+
+  var raw = []
+
+  // 1. Primary immediate period boundaries (1D, 1W, 1M) if untagged
+  if (setupTf === "60" && p1D) {
+    var p1DVal = isLong ? Number(p1D.high) : Number(p1D.low)
+    if (isFinite(p1DVal) && (isLong ? p1DVal > bound : p1DVal < bound)) {
+      var dDom = resolveDominoHtfSignal("Daily", isLong, dList)
+      raw.push({
+        name: isLong ? "1D High" : "1D Low",
+        price: p1DVal,
+        timeframe: "1D",
+        kind: "primary",
+        priority: 1,
+        dominoSignal: dDom ? dDom.signalName : null,
+        dominoScenario: dDom ? dDom.scenarioTriggered : null,
+        isReversal: dDom ? dDom.isReversal : false
+      })
+    }
+  }
+  if (p1W) {
+    var p1WVal = isLong ? Number(p1W.high) : Number(p1W.low)
+    if (isFinite(p1WVal) && (isLong ? p1WVal > wBound : p1WVal < wBound)) {
+      var wDom = resolveDominoHtfSignal("Weekly", isLong, wList)
+      raw.push({
+        name: isLong ? "1W High" : "1W Low",
+        price: p1WVal,
+        timeframe: "1W",
+        kind: "primary",
+        priority: 2,
+        dominoSignal: wDom ? wDom.signalName : null,
+        dominoScenario: wDom ? wDom.scenarioTriggered : null,
+        isReversal: wDom ? wDom.isReversal : false
+      })
+    }
+  }
+  if (p1M) {
+    var p1MVal = isLong ? Number(p1M.high) : Number(p1M.low)
+    if (isFinite(p1MVal) && (isLong ? p1MVal > mBound : p1MVal < mBound)) {
+      var mDom = resolveDominoHtfSignal("Monthly", isLong, mList)
+      raw.push({
+        name: isLong ? "1M High" : "1M Low",
+        price: p1MVal,
+        timeframe: "1M",
+        kind: "primary",
+        priority: 3,
+        dominoSignal: mDom ? mDom.signalName : null,
+        dominoScenario: mDom ? mDom.scenarioTriggered : null,
+        isReversal: mDom ? mDom.isReversal : false
+      })
+    }
+  }
+
+  // 2. Current-period prior-session WTD / MTD extremes
+  if (priorWtdExtreme !== null && (isLong ? priorWtdExtreme > bound : priorWtdExtreme < bound)) {
+    raw.push({
+      name: isLong ? "WTD High" : "WTD Low",
+      price: priorWtdExtreme,
+      timeframe: "1W",
+      kind: "wtd",
+      priority: 7,
+      dominoSignal: null,
+      dominoScenario: null,
+      isReversal: false
+    })
+  }
+  if (priorMtdExtreme !== null && (isLong ? priorMtdExtreme > bound : priorMtdExtreme < bound)) {
+    raw.push({
+      name: isLong ? "MTD High" : "MTD Low",
+      price: priorMtdExtreme,
+      timeframe: "1M",
+      kind: "mtd",
+      priority: 6,
+      dominoSignal: null,
+      dominoScenario: null,
+      isReversal: false
+    })
+  }
+
+  // 3. Untagged lookback Daily swing pivots (last 60 completed trading days)
+  var dCount = closedDaily.length
+  var dMinIdx = Math.max(0, dCount - 60)
+  var runDailyBound = bound
+  if (dCount > 0) {
+    var lastDVal = isLong ? Number(closedDaily[dCount - 1].high) : Number(closedDaily[dCount - 1].low)
+    if (isFinite(lastDVal)) {
+      if (isLong && lastDVal > runDailyBound) runDailyBound = lastDVal
+      if (!isLong && lastDVal < runDailyBound) runDailyBound = lastDVal
+    }
+  }
+  for (var di = dCount - 2; di >= dMinIdx; di--) {
+    var dc = closedDaily[di]
+    if (!dc) continue
+    var dVal = isLong ? Number(dc.high) : Number(dc.low)
+    if (!isFinite(dVal)) continue
+    if (isLong ? dVal > runDailyBound : dVal < runDailyBound) {
+      runDailyBound = dVal
+      var hasLeftD = di > 0 && closedDaily[di - 1]
+      var leftDVal = hasLeftD ? (isLong ? Number(closedDaily[di - 1].high) : Number(closedDaily[di - 1].low)) : null
+      var isSwingD = !hasLeftD || !isFinite(leftDVal) || (isLong ? dVal >= leftDVal : dVal <= leftDVal)
+      if (isSwingD) {
+        raw.push({
+          name: isLong ? "1D Pivot High" : "1D Pivot Low",
+          price: dVal,
+          timeframe: "1D",
+          kind: "pivot1D",
+          priority: 5,
+          dominoSignal: null,
+          dominoScenario: null,
+          isReversal: false
+        })
+      }
+    }
+  }
+
+  // 4. Untagged lookback Weekly swing pivots (last 26 completed weeks)
+  var wCount = closedWeekly.length
+  var wMinIdx = Math.max(0, wCount - 26)
+  var runWeeklyBound = wBound
+  if (wCount > 0) {
+    var lastWVal = isLong ? Number(closedWeekly[wCount - 1].high) : Number(closedWeekly[wCount - 1].low)
+    if (isFinite(lastWVal)) {
+      if (isLong && lastWVal > runWeeklyBound) runWeeklyBound = lastWVal
+      if (!isLong && lastWVal < runWeeklyBound) runWeeklyBound = lastWVal
+    }
+  }
+  for (var wi = wCount - 2; wi >= wMinIdx; wi--) {
+    var wc = closedWeekly[wi]
+    if (!wc) continue
+    var wVal = isLong ? Number(wc.high) : Number(wc.low)
+    if (!isFinite(wVal)) continue
+    if (isLong ? wVal > runWeeklyBound : wVal < runWeeklyBound) {
+      runWeeklyBound = wVal
+      var hasLeftW = wi > 0 && closedWeekly[wi - 1]
+      var leftWVal = hasLeftW ? (isLong ? Number(closedWeekly[wi - 1].high) : Number(closedWeekly[wi - 1].low)) : null
+      var isSwingW = !hasLeftW || !isFinite(leftWVal) || (isLong ? wVal >= leftWVal : wVal <= leftWVal)
+      if (isSwingW) {
+        raw.push({
+          name: isLong ? "1W Pivot High" : "1W Pivot Low",
+          price: wVal,
+          timeframe: "1W",
+          kind: "pivot1W",
+          priority: 4,
+          dominoSignal: null,
+          dominoScenario: null,
+          isReversal: false
+        })
+      }
+    }
+  }
+
+  if (raw.length === 0) return []
+
+  // Sort by proximity to entry (ascending for LONG, descending for SHORT)
+  raw.sort(function(a, b) {
+    var diff = isLong ? (a.price - b.price) : (b.price - a.price)
+    if (Math.abs(diff) >= 0.005) return diff
+    return (a.priority || 99) - (b.priority || 99)
+  })
+
+  // Cluster & merge confluent levels within $0.005
+  var clusters = []
+  for (var ci = 0; ci < raw.length; ci++) {
+    var item = raw[ci]
+    var lastCluster = clusters.length > 0 ? clusters[clusters.length - 1] : null
+    if (lastCluster && Math.abs(item.price - lastCluster[0].price) < 0.005) {
+      lastCluster.push(item)
+    } else {
+      clusters.push([item])
+    }
+  }
+
+  var merged = []
+  for (var gi = 0; gi < clusters.length; gi++) {
+    var grp = clusters[gi]
+    var bestPrimary = null
+    var hasPivot1D = false
+    var hasPivot1W = false
+    var hasMtd = false
+    var hasWtd = false
+    for (var mj = 0; mj < grp.length; mj++) {
+      var cand = grp[mj]
+      if (cand.kind === "primary") {
+        if (!bestPrimary || cand.priority < bestPrimary.priority) bestPrimary = cand
+      } else if (cand.kind === "pivot1D") {
+        hasPivot1D = true
+      } else if (cand.kind === "pivot1W") {
+        hasPivot1W = true
+      } else if (cand.kind === "mtd") {
+        hasMtd = true
+      } else if (cand.kind === "wtd") {
+        hasWtd = true
+      }
+    }
+
+    if (bestPrimary) {
+      merged.push({
+        name: bestPrimary.name,
+        price: bestPrimary.price,
+        timeframe: bestPrimary.timeframe,
+        dominoSignal: bestPrimary.dominoSignal,
+        dominoScenario: bestPrimary.dominoScenario,
+        isReversal: bestPrimary.isReversal
+      })
+    } else {
+      var dirSuffix = isLong ? "High" : "Low"
+      var pivotName = "1D Pivot " + dirSuffix
+      var pivotTf = "1D"
+      if (hasPivot1D && hasPivot1W) {
+        pivotName = "1D/1W Pivot " + dirSuffix
+        pivotTf = "1W"
+      } else if (hasPivot1W) {
+        pivotName = "1W Pivot " + dirSuffix
+        pivotTf = "1W"
+      } else if (hasPivot1D) {
+        pivotName = "1D Pivot " + dirSuffix
+        pivotTf = "1D"
+      } else if (hasMtd) {
+        pivotName = "MTD " + dirSuffix
+        pivotTf = "1M"
+      } else if (hasWtd) {
+        pivotName = "WTD " + dirSuffix
+        pivotTf = "1W"
+      }
+      merged.push({
+        name: pivotName,
+        price: grp[0].price,
+        timeframe: pivotTf,
+        dominoSignal: null,
+        dominoScenario: null,
+        isReversal: false
+      })
+    }
+  }
+
+  return merged.slice(0, 4)
+}
+
 function evaluateStratChecklist(symbol, hourlyCandles, dailyCandles, liveQuote, nowDate) {
   var sym = normalizeSymbol(symbol)
   var hourly = Array.isArray(hourlyCandles) ? hourlyCandles : []
@@ -3468,41 +3850,45 @@ function evaluateStratChecklist(symbol, hourlyCandles, dailyCandles, liveQuote, 
     }
   }
 
-  if (isLong) {
-    if (setupTf === "60" && p1D && triggerPrice !== null && Number(p1D.high) > triggerPrice) {
-      var dDom = resolveDominoHtfSignal("Daily", true, daily)
-      targets.push({
-        name: "1D High",
-        price: Number(p1D.high),
-        timeframe: "1D",
-        dominoSignal: dDom ? dDom.signalName : null,
-        dominoScenario: dDom ? dDom.scenarioTriggered : null,
-        isReversal: dDom ? dDom.isReversal : false
-      })
+  // Inception entry baseline (accounts for opening gaps past prior trigger) + earlier closed 60m bars today
+  var entryBaseline = null
+  if (triggerPrice !== null && isFinite(triggerPrice)) {
+    entryBaseline = Number(triggerPrice)
+    if (setupTf === "60" && c60 && isFinite(Number(c60.open))) {
+      var c60OpenVal = Number(c60.open)
+      entryBaseline = isLong ? Math.max(entryBaseline, c60OpenVal) : Math.min(entryBaseline, c60OpenVal)
+    } else if (setupTf === "1D" && c1D && isFinite(Number(c1D.open))) {
+      var c1DOpenVal = Number(c1D.open)
+      entryBaseline = isLong ? Math.max(entryBaseline, c1DOpenVal) : Math.min(entryBaseline, c1DOpenVal)
     }
-    if (p1W && triggerPrice !== null && Number(p1W.high) > triggerPrice) {
-      var wDom = resolveDominoHtfSignal("Weekly", true, weekly)
-      targets.push({
-        name: "1W High",
-        price: Number(p1W.high),
-        timeframe: "1W",
-        dominoSignal: wDom ? wDom.signalName : null,
-        dominoScenario: wDom ? wDom.scenarioTriggered : null,
-        isReversal: wDom ? wDom.isReversal : false
-      })
+  }
+
+  var priorTodayExtreme = null
+  if (setupTf === "60" && c60 && c1D && isFinite(c60.timestamp) && isFinite(c1D.timestamp)) {
+    var c60DayStart = periodStartUtc(c60.timestamp, "1D")
+    for (var hk = 0; hk < hourly.length - 1; hk++) {
+      var hc = hourly[hk]
+      if (!hc || !isFinite(hc.timestamp)) continue
+      if (hc.timestamp >= c1D.timestamp && periodStartUtc(hc.timestamp, "1D") === c60DayStart) {
+        var hVal = isLong ? Number(hc.high) : Number(hc.low)
+        if (isFinite(hVal)) {
+          if (priorTodayExtreme === null || (isLong ? hVal > priorTodayExtreme : hVal < priorTodayExtreme)) {
+            priorTodayExtreme = hVal
+          }
+        }
+      }
     }
-    if (p1M && triggerPrice !== null && Number(p1M.high) > triggerPrice) {
-      var mDom = resolveDominoHtfSignal("Monthly", true, monthly)
-      targets.push({
-        name: "1M High",
-        price: Number(p1M.high),
-        timeframe: "1M",
-        dominoSignal: mDom ? mDom.signalName : null,
-        dominoScenario: mDom ? mDom.scenarioTriggered : null,
-        isReversal: mDom ? mDom.isReversal : false
-      })
+  }
+
+  if (entryBaseline !== null) {
+    var htfTargets = resolveUntaggedHtfTargets(isLong, setupTf, daily, weekly, monthly, entryBaseline, priorTodayExtreme)
+    for (var hti = 0; hti < htfTargets.length && targets.length < 4; hti++) {
+      targets.push(htfTargets[hti])
     }
-    if (targets.length === 0) {
+  }
+
+  if (targets.length === 0) {
+    if (isLong) {
       if (p1D && Number(p1D.high) > 0) {
         var dDom0 = resolveDominoHtfSignal("Daily", true, daily)
         targets.push({ name: "1D High", price: Number(p1D.high), timeframe: "1D", dominoSignal: dDom0 ? dDom0.signalName : null, isReversal: dDom0 ? dDom0.isReversal : false })
@@ -3513,43 +3899,7 @@ function evaluateStratChecklist(symbol, hourlyCandles, dailyCandles, liveQuote, 
         var mDom0 = resolveDominoHtfSignal("Monthly", true, monthly)
         targets.push({ name: "1M High", price: Number(p1M.high), timeframe: "1M", dominoSignal: mDom0 ? mDom0.signalName : null, isReversal: mDom0 ? mDom0.isReversal : false })
       }
-    }
-  } else {
-    // Bearish / Short
-    if (setupTf === "60" && p1D && triggerPrice !== null && Number(p1D.low) < triggerPrice) {
-      var dDomBear = resolveDominoHtfSignal("Daily", false, daily)
-      targets.push({
-        name: "1D Low",
-        price: Number(p1D.low),
-        timeframe: "1D",
-        dominoSignal: dDomBear ? dDomBear.signalName : null,
-        dominoScenario: dDomBear ? dDomBear.scenarioTriggered : null,
-        isReversal: dDomBear ? dDomBear.isReversal : false
-      })
-    }
-    if (p1W && triggerPrice !== null && Number(p1W.low) < triggerPrice) {
-      var wDomBear = resolveDominoHtfSignal("Weekly", false, weekly)
-      targets.push({
-        name: "1W Low",
-        price: Number(p1W.low),
-        timeframe: "1W",
-        dominoSignal: wDomBear ? wDomBear.signalName : null,
-        dominoScenario: wDomBear ? wDomBear.scenarioTriggered : null,
-        isReversal: wDomBear ? wDomBear.isReversal : false
-      })
-    }
-    if (p1M && triggerPrice !== null && Number(p1M.low) < triggerPrice) {
-      var mDomBear = resolveDominoHtfSignal("Monthly", false, monthly)
-      targets.push({
-        name: "1M Low",
-        price: Number(p1M.low),
-        timeframe: "1M",
-        dominoSignal: mDomBear ? mDomBear.signalName : null,
-        dominoScenario: mDomBear ? mDomBear.scenarioTriggered : null,
-        isReversal: mDomBear ? mDomBear.isReversal : false
-      })
-    }
-    if (targets.length === 0) {
+    } else {
       if (p1D && Number(p1D.low) > 0) {
         var dDomBear0 = resolveDominoHtfSignal("Daily", false, daily)
         targets.push({ name: "1D Low", price: Number(p1D.low), timeframe: "1D", dominoSignal: dDomBear0 ? dDomBear0.signalName : null, isReversal: dDomBear0 ? dDomBear0.isReversal : false })
@@ -3592,11 +3942,13 @@ function evaluateStratChecklist(symbol, hourlyCandles, dailyCandles, liveQuote, 
     if (isLong) {
       if (currentPrice >= targetPrice) isTargetHit = true
       if (c60 && Number(c60.high) >= targetPrice) isTargetHit = true
-      if (c1D && Number(c1D.high) >= targetPrice) isTargetHit = true
+      if (liveQuote && finiteOrNull(liveQuote.dayHigh) !== null && Number(liveQuote.dayHigh) >= targetPrice) isTargetHit = true
+      if ((setupTf === "1D" || !c60) && c1D && Number(c1D.high) >= targetPrice) isTargetHit = true
     } else {
       if (currentPrice <= targetPrice) isTargetHit = true
       if (c60 && Number(c60.low) <= targetPrice) isTargetHit = true
-      if (c1D && Number(c1D.low) <= targetPrice) isTargetHit = true
+      if (liveQuote && finiteOrNull(liveQuote.dayLow) !== null && Number(liveQuote.dayLow) <= targetPrice) isTargetHit = true
+      if ((setupTf === "1D" || !c60) && c1D && Number(c1D.low) <= targetPrice) isTargetHit = true
     }
   }
 
@@ -3960,6 +4312,421 @@ function discordAlertPayload(chk, eventType) {
   })
 }
 
+function timeframeRank(tf) {
+  switch (String(tf || "")) {
+  case "30": return 1
+  case "60": return 2
+  case "1D": return 3
+  case "1W": return 4
+  case "1M": return 5
+  case "1Y": return 6
+  default: return 0
+  }
+}
+
+function isLevelVisibleOnTimeframe(lvl, targetTf) {
+  if (!lvl) return false
+  if (!lvl.sourceTf) return true
+  var srcRank = timeframeRank(lvl.sourceTf)
+  var tgtRank = timeframeRank(targetTf)
+  if (srcRank === 0 || tgtRank === 0) return true
+  return tgtRank <= srcRank
+}
+
+function inHtfPeriod(ltfTs, htfTs, sourceTf) {
+  if (!isFinite(ltfTs) || !isFinite(htfTs)) return false
+  var dL = new Date(ltfTs * 1000)
+  var dH = new Date(htfTs * 1000)
+  if (sourceTf === "1Y") {
+    return dL.getUTCFullYear() === dH.getUTCFullYear()
+  }
+  if (sourceTf === "1M") {
+    return dL.getUTCFullYear() === dH.getUTCFullYear() &&
+           dL.getUTCMonth() === dH.getUTCMonth()
+  }
+  if (sourceTf === "1W") {
+    var dayL = dL.getUTCDay()
+    var diffL = dL.getUTCDate() - dayL + (dayL === 0 ? -6 : 1)
+    var monL = Date.UTC(dL.getUTCFullYear(), dL.getUTCMonth(), diffL)
+    var dayH = dH.getUTCDay()
+    var diffH = dH.getUTCDate() - dayH + (dayH === 0 ? -6 : 1)
+    var monH = Date.UTC(dH.getUTCFullYear(), dH.getUTCMonth(), diffH)
+    return monL === monH
+  }
+  if (sourceTf === "1D") {
+    return dL.getUTCFullYear() === dH.getUTCFullYear() &&
+           dL.getUTCMonth() === dH.getUTCMonth() &&
+           dL.getUTCDate() === dH.getUTCDate()
+  }
+  if (sourceTf === "60") {
+    return dL.getUTCFullYear() === dH.getUTCFullYear() &&
+           dL.getUTCMonth() === dH.getUTCMonth() &&
+           dL.getUTCDate() === dH.getUTCDate() &&
+           ltfTs >= htfTs && ltfTs < htfTs + 3600
+  }
+  return ltfTs === htfTs
+}
+
+function resolveLevelAnchorIndex(lvl, allCandles, targetTf) {
+  if (!allCandles || allCandles.length === 0 || !lvl) return 0
+  if (!isFinite(lvl.anchorTs) || lvl.ohlcField === "scale") return 0
+
+  var srcTf = String(lvl.sourceTf || targetTf || "1D")
+  var tgtTf = String(targetTf || srcTf)
+  var srcRank = timeframeRank(srcTf)
+  var tgtRank = timeframeRank(tgtTf)
+
+  if (srcTf === tgtTf || tgtRank >= srcRank) {
+    var bestIdx = 0
+    var bestDiff = Math.abs(allCandles[0].timestamp - lvl.anchorTs)
+    for (var i = 1; i < allCandles.length; i++) {
+      var diff = Math.abs(allCandles[i].timestamp - lvl.anchorTs)
+      if (diff < bestDiff) {
+        bestDiff = diff
+        bestIdx = i
+      }
+    }
+    return bestIdx
+  }
+
+  var matches = []
+  for (var j = 0; j < allCandles.length; j++) {
+    if (inHtfPeriod(allCandles[j].timestamp, lvl.anchorTs, srcTf)) {
+      matches.push(j)
+    }
+  }
+
+  if (matches.length === 0) {
+    if (lvl.anchorTs < allCandles[0].timestamp) return 0
+    if (lvl.anchorTs > allCandles[allCandles.length - 1].timestamp) return allCandles.length - 1
+    var fbIdx = 0
+    var fbDiff = Math.abs(allCandles[0].timestamp - lvl.anchorTs)
+    for (var k = 1; k < allCandles.length; k++) {
+      var d = Math.abs(allCandles[k].timestamp - lvl.anchorTs)
+      if (d < fbDiff) {
+        fbDiff = d
+        fbIdx = k
+      }
+    }
+    return fbIdx
+  }
+
+  var field = lvl.ohlcField || "close"
+  if (field === "open") {
+    return matches[0]
+  }
+  if (field === "close") {
+    return matches[matches.length - 1]
+  }
+  if (field === "high") {
+    var bestHighIdx = matches[0]
+    var bestHighVal = Number(allCandles[bestHighIdx].high)
+    var bestHighDiff = isFinite(lvl.price) ? Math.abs(bestHighVal - lvl.price) : Infinity
+    for (var m = 1; m < matches.length; m++) {
+      var candIdx = matches[m]
+      var candHigh = Number(allCandles[candIdx].high)
+      if (isFinite(lvl.price)) {
+        var hDiff = Math.abs(candHigh - lvl.price)
+        if (hDiff < bestHighDiff - 1e-9 || (Math.abs(hDiff - bestHighDiff) <= 1e-9 && candHigh > bestHighVal)) {
+          bestHighDiff = hDiff
+          bestHighVal = candHigh
+          bestHighIdx = candIdx
+        }
+      } else if (candHigh > bestHighVal) {
+        bestHighVal = candHigh
+        bestHighIdx = candIdx
+      }
+    }
+    return bestHighIdx
+  }
+  if (field === "low") {
+    var bestLowIdx = matches[0]
+    var bestLowVal = Number(allCandles[bestLowIdx].low)
+    var bestLowDiff = isFinite(lvl.price) ? Math.abs(bestLowVal - lvl.price) : Infinity
+    for (var n = 1; n < matches.length; n++) {
+      var lIdx = matches[n]
+      var candLow = Number(allCandles[lIdx].low)
+      if (isFinite(lvl.price)) {
+        var lDiff = Math.abs(candLow - lvl.price)
+        if (lDiff < bestLowDiff - 1e-9 || (Math.abs(lDiff - bestLowDiff) <= 1e-9 && candLow < bestLowVal)) {
+          bestLowDiff = lDiff
+          bestLowVal = candLow
+          bestLowIdx = lIdx
+        }
+      } else if (candLow < bestLowVal) {
+        bestLowVal = candLow
+        bestLowIdx = lIdx
+      }
+    }
+    return bestLowIdx
+  }
+
+  return matches[matches.length - 1]
+}
+
+function periodStartUtc(ts, tf) {
+  var t = Number(ts)
+  if (!isFinite(t) || t <= 0) return 0
+  var d = new Date(t * 1000)
+  if (tf === "1Y") {
+    return Date.UTC(d.getUTCFullYear(), 0, 1) / 1000
+  }
+  if (tf === "1M") {
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000
+  }
+  if (tf === "1W") {
+    var day = d.getUTCDay()
+    var diff = d.getUTCDate() - day + (day === 0 ? -6 : 1)
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), diff) / 1000
+  }
+  if (tf === "1D") {
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / 1000
+  }
+  return t
+}
+
+function buildReplayCandles(tf, rawCandles, ltf30Candles, htf60Candles, dailyCandles, cutoffTs) {
+  if (!Array.isArray(rawCandles) || rawCandles.length === 0) return []
+  var cutoff = finiteOrNull(cutoffTs)
+  if (cutoff === null || cutoff <= 0) return rawCandles
+
+  var range = String(tf || "1D")
+  var ltf30 = Array.isArray(ltf30Candles) ? ltf30Candles : []
+  var htf60 = Array.isArray(htf60Candles) ? htf60Candles : []
+  var daily = Array.isArray(dailyCandles) ? dailyCandles : []
+  var intradaySrc = ltf30.length > 0 ? ltf30 : htf60
+  var out = []
+
+  if (range === "30") {
+    for (var i = 0; i < rawCandles.length; i++) {
+      var c30 = rawCandles[i]
+      if (c30 && isFinite(c30.timestamp) && c30.timestamp < cutoff) {
+        out.push({
+          timestamp: c30.timestamp,
+          open: c30.open,
+          high: c30.high,
+          low: c30.low,
+          close: c30.close,
+          volume: c30.volume || 0
+        })
+      }
+    }
+    return out
+  }
+
+  if (range === "60") {
+    for (var j = 0; j < rawCandles.length; j++) {
+      var b60 = rawCandles[j]
+      if (!b60 || !isFinite(b60.timestamp) || b60.timestamp >= cutoff) continue
+      var needsPartial = (cutoff < b60.timestamp + 3600) || (j === rawCandles.length - 1) || (j + 1 < rawCandles.length && rawCandles[j + 1].timestamp > cutoff)
+      if (needsPartial && ltf30.length > 0) {
+        var sub30 = []
+        for (var k = 0; k < ltf30.length; k++) {
+          var s = ltf30[k]
+          if (s && isFinite(s.timestamp) && s.timestamp < cutoff && inHtfPeriod(s.timestamp, b60.timestamp, "60")) {
+            sub30.push(s)
+          }
+        }
+        if (sub30.length > 0) {
+          var o60 = sub30[0].open
+          var h60 = sub30[0].high
+          var l60 = sub30[0].low
+          var cl60 = sub30[sub30.length - 1].close
+          var v60 = 0
+          for (var m = 0; m < sub30.length; m++) {
+            if (sub30[m].high > h60) h60 = sub30[m].high
+            if (sub30[m].low < l60) l60 = sub30[m].low
+            v60 += (sub30[m].volume || 0)
+          }
+          out.push({
+            timestamp: b60.timestamp,
+            open: o60,
+            high: h60,
+            low: l60,
+            close: cl60,
+            volume: v60
+          })
+          continue
+        }
+      }
+      out.push({
+        timestamp: b60.timestamp,
+        open: b60.open,
+        high: b60.high,
+        low: b60.low,
+        close: b60.close,
+        volume: b60.volume || 0
+      })
+    }
+    return out
+  }
+
+  var lastIntradayTs = null
+  for (var ii = 0; ii < intradaySrc.length; ii++) {
+    var ic = intradaySrc[ii]
+    if (ic && isFinite(ic.timestamp) && ic.timestamp < cutoff) {
+      if (lastIntradayTs === null || ic.timestamp > lastIntradayTs) {
+        lastIntradayTs = ic.timestamp
+      }
+    }
+  }
+  var refTs = lastIntradayTs !== null ? lastIntradayTs : (cutoff - 1)
+  var cutoffPeriodStart = periodStartUtc(refTs, range)
+  var cutoffDayStart = periodStartUtc(refTs, "1D")
+
+  for (var hi = 0; hi < rawCandles.length; hi++) {
+    var bh = rawCandles[hi]
+    if (!bh || !isFinite(bh.timestamp)) continue
+    var bPeriodStart = periodStartUtc(bh.timestamp, range)
+    if (bPeriodStart > cutoffPeriodStart) continue
+    if (bPeriodStart < cutoffPeriodStart) {
+      out.push({
+        timestamp: bh.timestamp,
+        open: bh.open,
+        high: bh.high,
+        low: bh.low,
+        close: bh.close,
+        volume: bh.volume || 0
+      })
+      continue
+    }
+
+    var subBars = []
+    if (range === "1D") {
+      for (var di = 0; di < intradaySrc.length; di++) {
+        var dc = intradaySrc[di]
+        if (dc && isFinite(dc.timestamp) && dc.timestamp < cutoff && periodStartUtc(dc.timestamp, "1D") === cutoffDayStart) {
+          subBars.push(dc)
+        }
+      }
+    } else {
+      for (var pdi = 0; pdi < daily.length; pdi++) {
+        var pd = daily[pdi]
+        if (pd && isFinite(pd.timestamp)) {
+          var pdDay = periodStartUtc(pd.timestamp, "1D")
+          if (periodStartUtc(pd.timestamp, range) === cutoffPeriodStart && pdDay < cutoffDayStart) {
+            subBars.push(pd)
+          }
+        }
+      }
+      for (var idi = 0; idi < intradaySrc.length; idi++) {
+        var idc = intradaySrc[idi]
+        if (idc && isFinite(idc.timestamp) && idc.timestamp < cutoff && periodStartUtc(idc.timestamp, range) === cutoffPeriodStart) {
+          var idcDay = periodStartUtc(idc.timestamp, "1D")
+          if (daily.length === 0 || idcDay >= cutoffDayStart) {
+            subBars.push(idc)
+          }
+        }
+      }
+    }
+
+    if (subBars.length > 0) {
+      var startsEarlierThanCache = (range === "1Y" || range === "1M") && periodStartUtc(subBars[0].timestamp, "1D") > cutoffPeriodStart + 86400 * 5
+      var oh = startsEarlierThanCache ? bh.open : subBars[0].open
+      var hh = startsEarlierThanCache ? Math.max(bh.open, subBars[0].high) : subBars[0].high
+      var lh = startsEarlierThanCache ? Math.min(bh.open, subBars[0].low) : subBars[0].low
+      var clh = subBars[subBars.length - 1].close
+      var vh = 0
+      for (var sb = 0; sb < subBars.length; sb++) {
+        if (subBars[sb].high > hh) hh = subBars[sb].high
+        if (subBars[sb].low < lh) lh = subBars[sb].low
+        vh += (subBars[sb].volume || 0)
+      }
+      out.push({
+        timestamp: bh.timestamp,
+        open: oh,
+        high: hh,
+        low: lh,
+        close: clh,
+        volume: vh
+      })
+    } else if (bh.timestamp < cutoff) {
+      out.push({
+        timestamp: bh.timestamp,
+        open: bh.open,
+        high: bh.high,
+        low: bh.low,
+        close: bh.close,
+        volume: bh.volume || 0
+      })
+    }
+  }
+
+  return out
+}
+
+function buildReplayQuote(liveQuote, ltf30Candles, htf60Candles, dailyCandles, cutoffTs) {
+  var cutoff = finiteOrNull(cutoffTs)
+  if (cutoff === null || cutoff <= 0) return liveQuote
+  var ltf30 = Array.isArray(ltf30Candles) ? ltf30Candles : []
+  var htf60 = Array.isArray(htf60Candles) ? htf60Candles : []
+  var daily = Array.isArray(dailyCandles) ? dailyCandles : []
+  var intradaySrc = ltf30.length > 0 ? ltf30 : (htf60.length > 0 ? htf60 : daily)
+
+  var lastBar = null
+  for (var i = 0; i < intradaySrc.length; i++) {
+    var c = intradaySrc[i]
+    if (c && isFinite(c.timestamp) && c.timestamp < cutoff) {
+      if (!lastBar || c.timestamp >= lastBar.timestamp) {
+        lastBar = c
+      }
+    }
+  }
+  if (!lastBar) return liveQuote
+
+  var replayPrice = Number(lastBar.close)
+  var base = (liveQuote && typeof liveQuote === "object") ? Object.assign({}, liveQuote) : {}
+  base.price = replayPrice
+  base.regularPrice = replayPrice
+  base.regularMarketPrice = replayPrice
+  base.dayHigh = null
+  base.dayLow = null
+  base.hasExtended = false
+  base.extendedPrice = null
+  base.session = "regular"
+  return base
+}
+
+function stepReplayCutoff(rawCandles, currentCutoffTs, direction) {
+  if (!Array.isArray(rawCandles) || rawCandles.length < 2) return 0
+  var cutoff = finiteOrNull(currentCutoffTs)
+  var dir = direction < 0 ? -1 : 1
+  if (cutoff === null || cutoff <= 0) {
+    return rawCandles[rawCandles.length - 1].timestamp
+  }
+  var firstExcludedIdx = rawCandles.length
+  for (var i = 0; i < rawCandles.length; i++) {
+    if (rawCandles[i] && isFinite(rawCandles[i].timestamp) && rawCandles[i].timestamp >= cutoff) {
+      firstExcludedIdx = i
+      break
+    }
+  }
+  if (dir < 0) {
+    var prevIdx = Math.max(1, firstExcludedIdx - 1)
+    return rawCandles[prevIdx].timestamp
+  }
+  var nextIdx = firstExcludedIdx + 1
+  if (nextIdx >= rawCandles.length) return 0
+  return rawCandles[nextIdx].timestamp
+}
+
+function formatReplayBadgeTime(cutoffTs, ltf30Candles, htf60Candles, dailyCandles) {
+  var cutoff = finiteOrNull(cutoffTs)
+  if (cutoff === null || cutoff <= 0) return ""
+  var ltf30 = Array.isArray(ltf30Candles) ? ltf30Candles : []
+  var htf60 = Array.isArray(htf60Candles) ? htf60Candles : []
+  var daily = Array.isArray(dailyCandles) ? dailyCandles : []
+  var src = ltf30.length > 0 ? ltf30 : (htf60.length > 0 ? htf60 : daily)
+  var activeTs = cutoff
+  var tfKey = (ltf30.length > 0 || htf60.length > 0) ? "30" : "1D"
+  for (var i = 0; i < src.length; i++) {
+    if (src[i] && isFinite(src[i].timestamp) && src[i].timestamp < cutoff) {
+      activeTs = src[i].timestamp
+    }
+  }
+  return formatCandleTime(activeTs, tfKey)
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     defaultWatchlist: defaultWatchlist,
@@ -4057,13 +4824,23 @@ if (typeof module !== "undefined") {
     formatNetDelta: formatNetDelta,
     stratRuleRationales: stratRuleRationales,
     resolveDominoHtfSignal: resolveDominoHtfSignal,
+    resolveUntaggedHtfTargets: resolveUntaggedHtfTargets,
     evaluateStratChecklist: evaluateStratChecklist,
     discordAlertPayload: discordAlertPayload,
     stratLivePrice: stratLivePrice,
     stratBarState: stratBarState,
     stratEntryState: stratEntryState,
     stratHtfQuality: stratHtfQuality,
-    extractBar60: extractBar60
+    extractBar60: extractBar60,
+    timeframeRank: timeframeRank,
+    isLevelVisibleOnTimeframe: isLevelVisibleOnTimeframe,
+    inHtfPeriod: inHtfPeriod,
+    resolveLevelAnchorIndex: resolveLevelAnchorIndex,
+    periodStartUtc: periodStartUtc,
+    buildReplayCandles: buildReplayCandles,
+    buildReplayQuote: buildReplayQuote,
+    stepReplayCutoff: stepReplayCutoff,
+    formatReplayBadgeTime: formatReplayBadgeTime
   }
 }
 

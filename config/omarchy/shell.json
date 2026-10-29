@@ -1,33 +1,15 @@
 {
-  "version": 1,
-  "idle": {
-    "screensaver": 3600,
-    "lock": 43200
-  },
   "bar": {
-    "position": "top",
-    "transparent": false,
     "centerAnchor": "omarchy.clock",
     "layout": {
-      "left": [
-        {
-          "id": "omarchy.menu"
-        },
-        {
-          "id": "omarchy.workspaces"
-        },
-        {
-          "id": "omarchy.media"
-        }
-      ],
       "center": [
         {
           "id": "omarchy.indicators"
         },
         {
-          "id": "omarchy.clock",
           "format": "dddd, MMMM d, yyyy HH:mm",
           "formatAlt": "d MMMM 'W'ww yyyy",
+          "id": "omarchy.clock",
           "verticalFormat": "HH\n—\nmm"
         },
         {
@@ -40,13 +22,24 @@
           "id": "omarchy.system-update"
         }
       ],
+      "left": [
+        {
+          "id": "omarchy.menu"
+        },
+        {
+          "id": "omarchy.workspaces"
+        },
+        {
+          "id": "omarchy.media"
+        }
+      ],
       "right": [
         {
+          "hidden": [],
           "id": "omarchy.tray",
           "pinned": [
             "NordVPN"
-          ],
-          "hidden": []
+          ]
         },
         {
           "id": "yamz8.omanki"
@@ -97,7 +90,19 @@
           "id": "omarchy.power"
         }
       ]
-    }
+    },
+    "position": "top",
+    "transparent": true
+  },
+  "cloneSourceRestores": [
+    "juwimana.lock"
+  ],
+  "disabledPlugins": [
+    "omarchy.lock"
+  ],
+  "idle": {
+    "lock": 43200,
+    "screensaver": 3600
   },
   "plugins": [
     {
@@ -107,10 +112,5 @@
       "id": "juwimana.lock"
     }
   ],
-  "disabledPlugins": [
-    "omarchy.lock"
-  ],
-  "cloneSourceRestores": [
-    "juwimana.lock"
-  ]
+  "version": 1
 }
