@@ -41,7 +41,7 @@ Panel {
   readonly property color accentColor: (root.activeSource && root.activeSource.color) ? root.activeSource.color : Color.accent
   readonly property color mutedColor: Color.muted
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property int panelWidth: Style.space(440)
+  readonly property int panelWidth: Style.space(660)
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -59,17 +59,22 @@ Panel {
     }
   }
 
+  function openLocalImage(path) {
+    if (!path || path === "") return
+    Quickshell.execDetached(["xdg-open", path])
+  }
+
   function fetchData(force) {
     if (fetchProcess.running || root.isFetching) return
     root.isFetching = true
-    root.statusMessage = force ? "Refreshing covers..." : ""
+    root.statusMessage = force ? "Refreshing..." : ""
     fetchProcess.command = force ? [root.runnerPath, "refresh"] : [root.runnerPath, "json"]
     fetchProcess.running = true
   }
 
   function postDiscord() {
     if (discordProcess.running) return
-    root.statusMessage = "Posting cover to Discord..."
+    root.statusMessage = "Posting to Discord..."
     discordProcess.command = [root.runnerPath, "discord", "--source", root.currentSourceKey, "--index", String(root.selectedCoverIndex)]
     discordProcess.running = true
   }
@@ -80,6 +85,7 @@ Panel {
   }
 
   function nextCover() {
+    if (root.coversList.length <= 1) return
     if (root.selectedCoverIndex < root.coversList.length - 1) {
       root.selectedCoverIndex++
     } else {
@@ -88,10 +94,11 @@ Panel {
   }
 
   function prevCover() {
+    if (root.coversList.length <= 1) return
     if (root.selectedCoverIndex > 0) {
       root.selectedCoverIndex--
     } else {
-      root.selectedCoverIndex = Math.max(0, root.coversList.length - 1)
+      root.selectedCoverIndex = root.coversList.length - 1
     }
   }
 
@@ -106,7 +113,7 @@ Panel {
         root.statusMessage = ""
       }
     } catch (e) {
-      root.statusMessage = "Parse error"
+      root.statusMessage = "Data error"
     }
   }
 
@@ -192,7 +199,7 @@ Panel {
   }
 
   // -------------------------------------------------------------
-  // POPUP KEYBOARD PANEL (COVER-FOCUSED VIEWER)
+  // POPUP KEYBOARD PANEL (POLISHED MAGAZINE VIEWER)
   // -------------------------------------------------------------
   KeyboardPanel {
     id: panel
@@ -202,7 +209,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(root.panelWidth)
-    contentHeight: panel.fittedContentHeight(mainColumn.implicitHeight, Style.space(620))
+    contentHeight: panel.fittedContentHeight(mainColumn.implicitHeight)
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -233,6 +240,12 @@ Panel {
             root.openUrl(root.activeCover.source_url || root.activeCover.image_url)
             event.accepted = true
           }
+        } else if (event.key === Qt.Key_V || event.key === Qt.Key_Space) {
+          if (root.activeCover) {
+            if (root.activeCover.local_image) root.openLocalImage(root.activeCover.local_image)
+            else root.openUrl(root.activeCover.image_url)
+            event.accepted = true
+          }
         } else if (event.key === Qt.Key_D) {
           root.postDiscord()
           event.accepted = true
@@ -248,85 +261,120 @@ Panel {
         } else if (event.key === Qt.Key_4) {
           root.selectSource("newsweek")
           event.accepted = true
+        } else if (event.key === Qt.Key_Left || event.key === Qt.Key_H) {
+          root.prevCover()
+          event.accepted = true
+        } else if (event.key === Qt.Key_Right || event.key === Qt.Key_L) {
+          root.nextCover()
+          event.accepted = true
         }
       }
-    }
 
-    Item {
-      anchors.fill: parent
-
-      Column {
+      ColumnLayout {
         id: mainColumn
-        width: parent.width
-        spacing: Style.space(10)
-        topPadding: Style.space(14)
-        bottomPadding: Style.space(14)
-        leftPadding: Style.space(16)
-        rightPadding: Style.space(16)
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        spacing: Style.space(8)
 
         // --------------------------------------------------------
-        // 1. MAGAZINE SOURCE TABS (Economist, New Yorker, Barron's, Newsweek)
+        // 1. SOURCE SELECTOR TABS (Economist, New Yorker, Barron's, Newsweek)
         // --------------------------------------------------------
-        RowLayout {
-          width: parent.width
-          spacing: Style.space(4)
+        Item {
+          Layout.fillWidth: true
+          Layout.preferredHeight: Style.space(36)
+          implicitHeight: Style.space(36)
 
-          Repeater {
-            model: [
-              { id: "economist", name: "The Economist", color: "#E51C1C" },
-              { id: "newyorker", name: "New Yorker", color: "#333333" },
-              { id: "barrons", name: "Barron's", color: "#0F4C81" },
-              { id: "newsweek", name: "Newsweek", color: "#E10600" }
-            ]
+          RowLayout {
+            anchors.fill: parent
+            spacing: Style.space(4)
 
-            Rectangle {
-              Layout.fillWidth: true
-              height: Style.space(26)
-              radius: Style.space(4)
-              color: root.currentSourceKey === modelData.id ?
-                     Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.12) :
-                     Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.03)
-              border.color: root.currentSourceKey === modelData.id ? modelData.color : "transparent"
-              border.width: root.currentSourceKey === modelData.id ? 1.5 : 0
+            Repeater {
+              model: [
+                { id: "economist", name: "The Economist", color: "#E51C1C" },
+                { id: "newyorker", name: "The New Yorker", color: "#D97706" },
+                { id: "barrons", name: "Barron's", color: "#2563EB" },
+                { id: "newsweek", name: "Newsweek", color: "#E10600" }
+              ]
 
-              Text {
-                anchors.centerIn: parent
-                text: modelData.name
-                color: root.currentSourceKey === modelData.id ? root.fg : root.mutedColor
-                font.family: root.fontFamily
-                font.bold: root.currentSourceKey === modelData.id
-                font.pixelSize: Math.max(10, Style.font.caption)
-                textFormat: Text.PlainText
-              }
+              Rectangle {
+                id: tabRect
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                radius: Style.space(4)
 
-              MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.selectSource(modelData.id)
+                readonly property bool isCurrent: root.currentSourceKey === modelData.id
+                readonly property bool isHovered: tabMouse.containsMouse
+
+                color: isCurrent ?
+                       Qt.rgba(modelData.color.r, modelData.color.g, modelData.color.b, 0.16) :
+                       (isHovered ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.08) : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.04))
+
+                border.color: isCurrent ? modelData.color : "transparent"
+                border.width: isCurrent ? 1.5 : 0
+
+                Row {
+                  anchors.centerIn: parent
+                  spacing: Style.space(5)
+
+                  // Accent dot for active source
+                  Rectangle {
+                    width: Style.space(5)
+                    height: Style.space(5)
+                    radius: Style.space(2.5)
+                    color: modelData.color
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: tabRect.isCurrent
+                  }
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: modelData.name
+                    color: tabRect.isCurrent ? root.fg : root.mutedColor
+                    font.family: root.fontFamily
+                    font.bold: tabRect.isCurrent
+                    font.pixelSize: Math.max(10, Style.font.caption)
+                    textFormat: Text.PlainText
+                  }
+                }
+
+                MouseArea {
+                  id: tabMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.selectSource(modelData.id)
+                }
               }
             }
           }
         }
 
         // --------------------------------------------------------
-        // 2. MAIN COVER ARTWORK HERO DISPLAY (LARGE & CLEAN)
+        // 2. HERO COVER ART DISPLAY (LARGE, CRISP & INTERACTIVE)
         // --------------------------------------------------------
         Rectangle {
-          width: parent.width
-          height: Style.space(330)
+          id: heroFrame
+          Layout.fillWidth: true
+          Layout.preferredHeight: Style.space(500)
+          implicitHeight: Style.space(500)
           radius: Style.space(6)
-          color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.03)
+          color: Qt.rgba(0, 0, 0, 0.24)
           border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.12)
           border.width: 1
           clip: true
 
+          // Main High-Res Cover Artwork
           Image {
             id: mainCoverImage
             anchors.centerIn: parent
             height: parent.height - Style.space(12)
             width: parent.width - Style.space(12)
             fillMode: Image.PreserveAspectFit
+            smooth: true
+            mipmap: true
             asynchronous: true
+            cache: true
             source: {
               if (!root.activeCover) return ""
               if (root.activeCover.local_image && root.activeCover.local_image.indexOf("/") === 0) {
@@ -350,13 +398,13 @@ Panel {
             }
           }
 
-          // Subtle publication logo or pill badge in top-left
+          // Publication Brand Pill (Top-Left)
           Rectangle {
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.margins: Style.space(8)
-            height: Style.space(20)
-            width: magBadgeText.implicitWidth + Style.space(12)
+            height: Style.space(22)
+            width: magBadgeText.implicitWidth + Style.space(14)
             radius: Style.space(3)
             color: root.accentColor
 
@@ -372,43 +420,162 @@ Panel {
             }
           }
 
+          // Issue Index Pill (Top-Right: e.g. "Cover 1 of 5")
+          Rectangle {
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: Style.space(8)
+            height: Style.space(22)
+            width: idxBadgeText.implicitWidth + Style.space(14)
+            radius: Style.space(3)
+            color: Qt.rgba(0, 0, 0, 0.6)
+            border.color: Qt.rgba(255, 255, 255, 0.15)
+            border.width: 1
+
+            Text {
+              id: idxBadgeText
+              anchors.centerIn: parent
+              text: {
+                if (root.coversList.length > 0) {
+                  return root.selectedCoverIndex === 0 ? "Latest Issue" : ((root.selectedCoverIndex + 1) + " of " + root.coversList.length)
+                }
+                return ""
+              }
+              color: "#FFFFFF"
+              font.pixelSize: Math.max(9, Style.font.caption - 2)
+              font.family: root.fontFamily
+              textFormat: Text.PlainText
+            }
+          }
+
+          // Left Arrow Button (Previous Cover)
+          Rectangle {
+            anchors.left: parent.left
+            anchors.leftMargin: Style.space(10)
+            anchors.verticalCenter: parent.verticalCenter
+            width: Style.space(32)
+            height: Style.space(32)
+            radius: Style.space(16)
+            color: leftArrowMouse.containsMouse ? Qt.rgba(0, 0, 0, 0.8) : Qt.rgba(0, 0, 0, 0.45)
+            border.color: Qt.rgba(255, 255, 255, 0.25)
+            border.width: 1
+            visible: heroMouse.containsMouse || leftArrowMouse.containsMouse
+            z: 2
+
+            Text {
+              anchors.centerIn: parent
+              text: "\uf053"
+              color: "#FFFFFF"
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            MouseArea {
+              id: leftArrowMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.prevCover()
+            }
+          }
+
+          // Right Arrow Button (Next Cover)
+          Rectangle {
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(10)
+            anchors.verticalCenter: parent.verticalCenter
+            width: Style.space(32)
+            height: Style.space(32)
+            radius: Style.space(16)
+            color: rightArrowMouse.containsMouse ? Qt.rgba(0, 0, 0, 0.8) : Qt.rgba(0, 0, 0, 0.45)
+            border.color: Qt.rgba(255, 255, 255, 0.25)
+            border.width: 1
+            visible: heroMouse.containsMouse || rightArrowMouse.containsMouse
+            z: 2
+
+            Text {
+              anchors.centerIn: parent
+              text: "\uf054"
+              color: "#FFFFFF"
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            MouseArea {
+              id: rightArrowMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.nextCover()
+            }
+          }
+
+          // Bottom Hover Hint Badge
+          Rectangle {
+            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottomMargin: Style.space(10)
+            height: Style.space(24)
+            width: zoomHintText.implicitWidth + Style.space(18)
+            radius: Style.space(4)
+            color: Qt.rgba(0, 0, 0, 0.75)
+            border.color: Qt.rgba(255, 255, 255, 0.2)
+            border.width: 1
+            visible: heroMouse.containsMouse
+            z: 2
+
+            Row {
+              anchors.centerIn: parent
+              spacing: Style.space(5)
+              Text {
+                text: "\uf00e"
+                color: "#FFFFFF"
+                font.family: root.fontFamily
+                font.pixelSize: Math.max(9, Style.font.caption - 1)
+              }
+              Text {
+                id: zoomHintText
+                text: "Click to open full size"
+                color: "#FFFFFF"
+                font.family: root.fontFamily
+                font.pixelSize: Math.max(9, Style.font.caption - 1)
+                textFormat: Text.PlainText
+              }
+            }
+          }
+
+          // Cover Click Area: open full image
           MouseArea {
+            id: heroMouse
             anchors.fill: parent
+            hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: {
-              if (root.activeCover && (root.activeCover.source_url || root.activeCover.image_url)) {
-                root.openUrl(root.activeCover.source_url || root.activeCover.image_url)
+              if (root.activeCover) {
+                if (root.activeCover.local_image) {
+                  root.openLocalImage(root.activeCover.local_image)
+                } else if (root.activeCover.source_url || root.activeCover.image_url) {
+                  root.openUrl(root.activeCover.source_url || root.activeCover.image_url)
+                }
               }
             }
           }
         }
 
-        // Status banner if present
-        Text {
-          visible: root.statusMessage !== ""
-          textFormat: Text.PlainText
-          text: root.statusMessage
-          color: Color.accent
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          font.bold: true
-          horizontalAlignment: Text.AlignHCenter
-          width: parent.width
-        }
-
         // --------------------------------------------------------
-        // 3. CAPTION: Date & Title of Active Cover
+        // 3. CAPTION: Headline & Date of Active Cover
         // --------------------------------------------------------
-        Column {
-          width: parent.width
+        ColumnLayout {
+          id: captionCol
+          Layout.fillWidth: true
           spacing: Style.space(2)
 
           Text {
-            width: parent.width
+            id: titleLabel
+            Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
-            maximumLineCount: 2
             elide: Text.ElideRight
+            maximumLineCount: 1
             textFormat: Text.PlainText
             text: (root.activeCover && root.activeCover.title) ? root.activeCover.title : ""
             color: root.fg
@@ -418,7 +585,8 @@ Panel {
           }
 
           Text {
-            width: parent.width
+            id: dateLabel
+            Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
             textFormat: Text.PlainText
             text: (root.activeCover && root.activeCover.formatted_date) ? root.activeCover.formatted_date : ""
@@ -431,60 +599,77 @@ Panel {
         // --------------------------------------------------------
         // 4. THE LAST FIVE COVERS (INTERACTIVE THUMBNAIL STRIP)
         // --------------------------------------------------------
-        RowLayout {
-          width: parent.width
-          spacing: Style.space(6)
+        Item {
+          Layout.fillWidth: true
+          Layout.preferredHeight: Style.space(92)
+          implicitHeight: Style.space(92)
 
-          Repeater {
-            model: root.coversList
+          RowLayout {
+            anchors.fill: parent
+            spacing: Style.space(6)
 
-            Rectangle {
-              Layout.fillWidth: true
-              height: Style.space(80)
-              radius: Style.space(4)
-              color: root.selectedCoverIndex === index ?
-                     Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.1) :
-                     Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.03)
-              border.color: root.selectedCoverIndex === index ? root.accentColor : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.1)
-              border.width: root.selectedCoverIndex === index ? 2 : 1
-              clip: true
+            Repeater {
+              model: root.coversList
 
-              Column {
-                anchors.fill: parent
-                anchors.margins: Style.space(4)
-                spacing: Style.space(3)
+              Rectangle {
+                id: thumbCard
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                radius: Style.space(4)
 
-                Image {
-                  width: parent.width
-                  height: Style.space(52)
-                  fillMode: Image.PreserveAspectFit
-                  asynchronous: true
-                  source: {
-                    if (modelData.local_image && modelData.local_image.indexOf("/") === 0) {
-                      return "file://" + modelData.local_image
+                readonly property bool isSelected: root.selectedCoverIndex === index
+                readonly property bool isHovered: thumbMouse.containsMouse
+
+                color: isSelected ?
+                       Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.16) :
+                       (isHovered ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.08) : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.03))
+
+                border.color: isSelected ? root.accentColor : (isHovered ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.25) : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.1))
+                border.width: isSelected ? 2 : 1
+                clip: true
+
+                ColumnLayout {
+                  anchors.fill: parent
+                  anchors.margins: Style.space(4)
+                  spacing: Style.space(2)
+
+                  Image {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
+                    mipmap: true
+                    asynchronous: true
+                    cache: true
+                    source: {
+                      if (modelData.local_image && modelData.local_image.indexOf("/") === 0) {
+                        return "file://" + modelData.local_image
+                      }
+                      return modelData.image_url || ""
                     }
-                    return modelData.image_url || ""
+                  }
+
+                  Text {
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    text: modelData.label || ("#" + (index + 1))
+                    color: thumbCard.isSelected ? root.fg : root.mutedColor
+                    font.family: root.fontFamily
+                    font.pixelSize: Math.max(9, Style.font.caption - 2)
+                    font.bold: thumbCard.isSelected
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
                   }
                 }
 
-                Text {
-                  width: parent.width
-                  horizontalAlignment: Text.AlignHCenter
-                  text: modelData.label || ("#" + (index + 1))
-                  color: root.selectedCoverIndex === index ? root.fg : root.mutedColor
-                  font.family: root.fontFamily
-                  font.pixelSize: Math.max(9, Style.font.caption - 2)
-                  font.bold: root.selectedCoverIndex === index
-                  textFormat: Text.PlainText
-                  elide: Text.ElideRight
-                }
-              }
-
-              MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                  root.selectedCoverIndex = index
+                MouseArea {
+                  id: thumbMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    root.selectedCoverIndex = index
+                  }
                 }
               }
             }
@@ -492,83 +677,153 @@ Panel {
         }
 
         // --------------------------------------------------------
-        // 5. MINIMAL BOTTOM ACTION CONTROLS
+        // 5. BOTTOM ACTION CONTROLS BAR
         // --------------------------------------------------------
-        RowLayout {
-          width: parent.width
-          spacing: Style.space(8)
+        Item {
+          Layout.fillWidth: true
+          Layout.preferredHeight: Style.space(40)
+          implicitHeight: Style.space(40)
 
-          // Open Full Cover Link
-          Rectangle {
-            Layout.fillWidth: true
-            height: Style.space(30)
-            radius: Style.space(4)
-            color: openHover.containsMouse ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.1) : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.05)
+          RowLayout {
+            anchors.fill: parent
+            spacing: Style.space(6)
 
-            Row {
-              anchors.centerIn: parent
-              spacing: Style.space(6)
+            // "Open Issue" Action Button (Web Article)
+            Rectangle {
+              Layout.preferredHeight: Style.space(32)
+              Layout.preferredWidth: openRow.implicitWidth + Style.space(18)
+              radius: Style.space(4)
+              color: openHover.containsMouse ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.12) : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.06)
 
-              Text {
-                text: "\uf08e"
-                font.family: root.fontFamily
-                color: root.fg
-                font.pixelSize: Style.font.caption
+              Row {
+                id: openRow
+                anchors.centerIn: parent
+                spacing: Style.space(6)
+
+                Text {
+                  text: "\uf08e"
+                  font.family: root.fontFamily
+                  color: root.fg
+                  font.pixelSize: Style.font.caption
+                }
+
+                Text {
+                  textFormat: Text.PlainText
+                  text: "Open Issue"
+                  color: root.fg
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                }
               }
 
-              Text {
-                textFormat: Text.PlainText
-                text: "Open Full Issue"
-                color: root.fg
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-            }
-
-            MouseArea {
-              id: openHover
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: {
-                if (root.activeCover && (root.activeCover.source_url || root.activeCover.image_url)) {
-                  root.openUrl(root.activeCover.source_url || root.activeCover.image_url)
+              MouseArea {
+                id: openHover
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  if (root.activeCover && (root.activeCover.source_url || root.activeCover.image_url)) {
+                    root.openUrl(root.activeCover.source_url || root.activeCover.image_url)
+                  }
                 }
               }
             }
-          }
 
-          // Discord Share
-          Rectangle {
-            width: Style.space(36)
-            height: Style.space(30)
-            radius: Style.space(4)
-            color: discordHover.containsMouse ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.12) : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.05)
+            // "High-Res" Action Button (Viewer)
+            Rectangle {
+              Layout.preferredHeight: Style.space(32)
+              Layout.preferredWidth: highResRow.implicitWidth + Style.space(18)
+              radius: Style.space(4)
+              color: highResHover.containsMouse ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.12) : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.06)
 
+              Row {
+                id: highResRow
+                anchors.centerIn: parent
+                spacing: Style.space(6)
+
+                Text {
+                  text: "\uf00e"
+                  font.family: root.fontFamily
+                  color: root.fg
+                  font.pixelSize: Style.font.caption
+                }
+
+                Text {
+                  textFormat: Text.PlainText
+                  text: "Full Res"
+                  color: root.fg
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+
+              MouseArea {
+                id: highResHover
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  if (root.activeCover) {
+                    if (root.activeCover.local_image) {
+                      root.openLocalImage(root.activeCover.local_image)
+                    } else {
+                      root.openUrl(root.activeCover.image_url)
+                    }
+                  }
+                }
+              }
+            }
+
+            // Status message in center
             Text {
-              anchors.centerIn: parent
-              text: "\uf392"
+              Layout.fillWidth: true
+              horizontalAlignment: Text.AlignHCenter
+              elide: Text.ElideRight
+              textFormat: Text.PlainText
+              text: root.statusMessage
+              color: root.accentColor
               font.family: root.fontFamily
-              color: root.fg
               font.pixelSize: Style.font.caption
+              font.bold: true
+              visible: root.statusMessage !== ""
             }
 
-            MouseArea {
-              id: discordHover
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.postDiscord()
+            Item {
+              Layout.fillWidth: true
+              visible: root.statusMessage === ""
             }
-          }
 
-          // Refresh
-          Rectangle {
-            width: Style.space(36)
-            height: Style.space(30)
-            radius: Style.space(4)
-            color: refHover.containsMouse ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.12) : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.05)
+            // Discord Share
+            Rectangle {
+              Layout.preferredWidth: Style.space(36)
+              Layout.preferredHeight: Style.space(32)
+              radius: Style.space(4)
+              color: discordHover.containsMouse ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.14) : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.05)
+
+              Text {
+                anchors.centerIn: parent
+                text: "\uf392"
+                font.family: root.fontFamily
+                color: root.fg
+                font.pixelSize: Style.font.caption
+              }
+
+              MouseArea {
+                id: discordHover
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.postDiscord()
+              }
+            }
+
+            // Refresh
+            Rectangle {
+              Layout.preferredWidth: Style.space(36)
+              Layout.preferredHeight: Style.space(32)
+              radius: Style.space(4)
+              color: refHover.containsMouse ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.14) : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.05)
 
             Text {
               anchors.centerIn: parent
@@ -589,10 +844,10 @@ Panel {
 
           // Close
           Rectangle {
-            width: Style.space(36)
-            height: Style.space(30)
+            Layout.preferredWidth: Style.space(36)
+            Layout.preferredHeight: Style.space(32)
             radius: Style.space(4)
-            color: closeHover.containsMouse ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.12) : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.05)
+            color: closeHover.containsMouse ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.14) : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.05)
 
             Text {
               anchors.centerIn: parent
@@ -614,4 +869,5 @@ Panel {
       }
     }
   }
+}
 }

@@ -164,17 +164,30 @@ def get_newyorker_covers() -> list[dict]:
         with urllib.request.urlopen(req, timeout=8, context=SSL_CTX) as r:
             html = r.read().decode("utf-8", errors="replace")
 
-        # Extract cover articles and images using pure regex
-        pairs = re.findall(r'<a[^>]+href="([^">]*cover-story[^">]*)"[^>]*>.*?<img[^>]+src="([^">]+)"', html, re.DOTALL)
+        matches = re.findall(r'<a[^>]+href="([^">]*cover-story[^">]*)"[^>]*>.*?<img[^>]+alt="([^"]*)"[^>]*src="([^">]+)"', html, re.DOTALL)
+        if not matches:
+            pairs = re.findall(r'<a[^>]+href="([^">]*cover-story[^">]*)"[^>]*>.*?<img[^>]+src="([^">]+)"', html, re.DOTALL)
+            matches = [(p[0], "", p[1]) for p in pairs]
+
         seen = set()
-        for url_path, img_url in pairs:
+        for url_path, alt_title, img_url in matches:
             if img_url in seen:
                 continue
             seen.add(img_url)
 
-            # Extract clean title from slug e.g. cover-story-2026-11-02 or headline
             slug = url_path.strip("/").split("/")[-1].replace("cover-story-", "")
-            title = f"The New Yorker · {slug}"
+            m_date = re.search(r"(\d{4})-(\d{2})-(\d{2})", slug)
+            if m_date:
+                dt = datetime.date(int(m_date.group(1)), int(m_date.group(2)), int(m_date.group(3)))
+                fmt_d = dt.strftime("%B %d, %Y")
+                lbl = dt.strftime("%b %d")
+                d_str = dt.isoformat()
+            else:
+                fmt_d = f"Issue of {slug}"
+                lbl = slug[-5:] if len(slug) >= 5 else f"#{len(covers)+1}"
+                d_str = slug
+
+            title = html_lib.unescape(alt_title.strip()) if alt_title.strip() else f"The New Yorker · {fmt_d}"
 
             h = hashlib.md5(img_url.encode()).hexdigest()[:8]
             local_path = os.path.join(COVERS_DIR, f"newyorker_{h}.jpg")
@@ -183,9 +196,9 @@ def get_newyorker_covers() -> list[dict]:
             covers.append({
                 "id": f"newyorker_{h}",
                 "title": title,
-                "date": slug,
-                "formatted_date": f"Cover Story ({slug})",
-                "label": slug[-5:] if len(slug) >= 5 else f"#{len(covers)+1}",
+                "date": d_str,
+                "formatted_date": fmt_d,
+                "label": lbl,
                 "image_url": img_url,
                 "local_image": local_path if has_local else img_url,
                 "source_url": ("https://www.newyorker.com" + url_path) if url_path.startswith("/") else url_path
