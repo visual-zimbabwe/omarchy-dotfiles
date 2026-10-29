@@ -108,9 +108,10 @@ fi
 
 # 5. Export Omarchy State & Widget Settings
 echo -e "${GREEN}--> Exporting Omarchy settings & widget state...${RESET}"
-mkdir -p "$REPO_DIR/state/settings" "$REPO_DIR/state/workspace-layouts"
+mkdir -p "$REPO_DIR/state/settings" "$REPO_DIR/state/workspace-layouts" "$REPO_DIR/state/economist"
 [[ -f "$HOME_DIR/.local/state/omarchy/settings/finance.json" ]] && cp -f "$HOME_DIR/.local/state/omarchy/settings/finance.json" "$REPO_DIR/state/settings/"
 [[ -f "$HOME_DIR/.local/state/omarchy/omanki.json" ]] && cp -f "$HOME_DIR/.local/state/omarchy/omanki.json" "$REPO_DIR/state/"
+[[ -f "$HOME_DIR/.local/state/omarchy/economist/config.json" ]] && cp -f "$HOME_DIR/.local/state/omarchy/economist/config.json" "$REPO_DIR/state/economist/"
 [[ -f "$HOME_DIR/.local/state/omarchy/omagotchi-settings.json" ]] && cp -f "$HOME_DIR/.local/state/omarchy/omagotchi-settings.json" "$REPO_DIR/state/"
 [[ -f "$HOME_DIR/.local/state/omarchy/key-promoter.json" ]] && cp -f "$HOME_DIR/.local/state/omarchy/key-promoter.json" "$REPO_DIR/state/"
 if [[ -d "$HOME_DIR/.local/state/omarchy/workspace-layouts" ]]; then

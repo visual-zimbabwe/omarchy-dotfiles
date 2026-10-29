@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "juwimana.economist",
+  "name": "The Economist",
+  "version": "1.0.0",
+  "author": "juwimana",
+  "license": "MIT",
+  "description": "The Economist weekly magazine cover illustration and editorial briefing HUD",
+  "kinds": [
+    "bar-widget"
+  ],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "The Economist",
+    "description": "Weekly cover illustration, cover story, and editorial briefings",
+    "category": "News",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

@@ -35,8 +35,9 @@ bash <(curl -fsSL https://raw.githubusercontent.com/visual-zimbabwe/omarchy-dotf
 * **Dynamic Workspace Layouts**: Automated layout engine (`omarchy-workspace-layout.lua` & `workspace-layout.json`) with Golden ratio and 2x4 grid splits.
 * **Status Bar Layout (`shell.json`)**: Custom top bar with center clock, weather, media player, and pinned tray.
 
-### 2. 🧩 10 Custom & Curated Status Bar Plugins (`config/omarchy/plugins/`)
+### 2. 🧩 11 Custom & Curated Status Bar Plugins (`config/omarchy/plugins/`)
 * 🔒 **`juwimana.lock`**: Custom biometric and lock screen integration.
+* 📰 **`juwimana.economist`**: The Economist weekly magazine cover illustration and editorial briefing HUD.
 * 🏠 **`juwimana.surrey-rentals`**: Real-time rental tracker widget.
 * 🎴 **`yamz8.omanki`**: Interactive Anki flashcard reviewer on the status bar.
 * 🎬 **`alexzeitler.ytdlp`**: Instant YouTube and media downloader widget.

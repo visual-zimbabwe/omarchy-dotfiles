@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""
+economist-fetch: Backend helper for Omarchy The Economist cover & weekly briefing plugin.
+Fetches weekly edition metadata from RSS, caches high-res covers locally, and supports Discord alerts.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+
+CACHE_DIR = os.path.expanduser("~/.local/state/omarchy/economist")
+COVERS_DIR = os.path.join(CACHE_DIR, "covers")
+CACHE_FILE = os.path.join(CACHE_DIR, "cache.json")
+CONFIG_FILE = os.path.join(CACHE_DIR, "config.json")
+
+RSS_URL = "https://www.economist.com/printedition/rss.xml"
+USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+
+
+def load_config() -> dict:
+    if not os.path.exists(CONFIG_FILE):
+        # Default config; can be populated with Discord webhook from ravens if found
+        default_cfg = {
+            "discord_webhook": "https://discord.com/api/webhooks/1478047144975007847/_Gug8GjeUvvWdR-rz0qOjSoDAxHm79lqLqQ6fv4I5MDf6PkQOo3weBCCtmjTWdCC-jKg",
+            "preferred_region": "US"  # US, UK, EU, AP
+        }
+        try:
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(default_cfg, f, indent=2)
+            return default_cfg
+        except Exception:
+            return default_cfg
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def download_image(url: str, dest_path: str) -> bool:
+    if os.path.exists(dest_path) and os.path.getsize(dest_path) > 1024:
+        return True
+    try:
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            content = resp.read()
+            if len(content) > 1024:
+                with open(dest_path, "wb") as f:
+                    f.write(content)
+                return True
+    except Exception as e:
+        sys.stderr.write(f"Image download error: {e}\n")
+    return False
+
+
+def fetch_latest_data(force: bool = False) -> dict:
+    os.makedirs(COVERS_DIR, exist_ok=True)
+    cfg = load_config()
+    region = cfg.get("preferred_region", "US")
+
+    # Check cache freshness (valid for 3 hours unless force)
+    if not force and os.path.exists(CACHE_FILE):
+        try:
+            mtime = os.path.getmtime(CACHE_FILE)
+            age = (datetime.datetime.now().timestamp() - mtime)
+            if age < 10800:  # 3 hours
+                with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                    cached = json.load(f)
+                if cached.get("current_issue", {}).get("title"):
+                    return cached
+        except Exception:
+            pass
+
+    # Fetch from RSS
+    try:
+        req = urllib.request.Request(RSS_URL, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            raw_xml = resp.read()
+        tree = ET.fromstring(raw_xml)
+        channel = tree.find("channel")
+        if channel is None:
+            raise ValueError("No channel in RSS feed")
+
+        link = (channel.find("link").text or "").strip()
+        title = (channel.find("title").text or "").strip()
+        pub_date = (channel.find("pubDate").text or "").strip()
+
+        m = re.search(r"(\d{4})-(\d{2})-(\d{2})", link)
+        if m:
+            base_date = datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        else:
+            base_date = datetime.date.today()
+
+        # Build current issue + 5 previous weekly issues
+        issues = []
+        for i in range(6):
+            iss_dt = base_date - datetime.timedelta(days=7 * i)
+            ymd = iss_dt.strftime("%Y%m%d")
+            iso = iss_dt.strftime("%Y-%m-%d")
+            formatted = iss_dt.strftime("%B %d, %Y")
+            short_fmt = iss_dt.strftime("%b %d")
+            img_url = f"https://www.economist.com/cdn-cgi/image/width=1200,quality=85,format=auto/content-assets/images/{ymd}_DE_{region}.jpg"
+            local_path = os.path.join(COVERS_DIR, f"{ymd}_DE_{region}.jpg")
+
+            # Download top 2 recent covers immediately
+            has_local = False
+            if i < 2:
+                has_local = download_image(img_url, local_path)
+            elif os.path.exists(local_path):
+                has_local = True
+
+            issues.append({
+                "date": iso,
+                "formatted_date": formatted,
+                "short_date": short_fmt,
+                "ymd": ymd,
+                "image_url": img_url,
+                "local_image": local_path if has_local else "",
+                "link": f"https://www.economist.com/weeklyedition/{iso}"
+            })
+
+        # Parse leading articles from feed
+        articles = []
+        for item in channel.findall("item")[:6]:
+            item_title = (item.find("title").text or "").strip() if item.find("title") is not None else ""
+            item_desc = (item.find("description").text or "").strip() if item.find("description") is not None and item.find("description").text else ""
+            item_link = (item.find("link").text or "").strip() if item.find("link") is not None else ""
+            if item_title:
+                articles.append({
+                    "title": item_title,
+                    "description": item_desc,
+                    "link": item_link
+                })
+
+        result = {
+            "current_issue": {
+                "date": issues[0]["date"],
+                "formatted_date": issues[0]["formatted_date"],
+                "short_date": issues[0]["short_date"],
+                "title": title,
+                "link": link,
+                "image_url": issues[0]["image_url"],
+                "local_image": issues[0]["local_image"],
+                "published_at": pub_date
+            },
+            "archive": issues,
+            "articles": articles,
+            "discord_configured": bool(cfg.get("discord_webhook")),
+            "updated_at": datetime.datetime.now().isoformat()
+        }
+
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2)
+
+        return result
+
+    except Exception as e:
+        sys.stderr.write(f"Fetch failed: {e}\n")
+        # Fallback to cache if available
+        if os.path.exists(CACHE_FILE):
+            try:
+                with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {
+            "error": str(e),
+            "current_issue": {
+                "date": datetime.date.today().isoformat(),
+                "formatted_date": datetime.date.today().strftime("%B %d, %Y"),
+                "short_date": datetime.date.today().strftime("%b %d"),
+                "title": "The Economist",
+                "link": "https://www.economist.com/weeklyedition",
+                "image_url": "",
+                "local_image": ""
+            },
+            "archive": [],
+            "articles": [],
+            "discord_configured": False
+        }
+
+
+def send_to_discord(cover_data: dict | None = None) -> bool:
+    cfg = load_config()
+    webhook_url = cfg.get("discord_webhook")
+    if not webhook_url:
+        sys.stderr.write("No Discord webhook configured in config.json\n")
+        return False
+
+    if not cover_data:
+        data = fetch_latest_data()
+        cover_data = data.get("current_issue", {})
+
+    title = f"The Economist — {cover_data.get('formatted_date', '')}"
+    desc = cover_data.get("title", "")
+    url = cover_data.get("link", "https://www.economist.com/weeklyedition")
+    image_url = cover_data.get("image_url", "")
+
+    embed = {
+        "title": title,
+        "description": f"**Cover Story:** {desc}",
+        "url": url,
+        "color": 15015708,  # Red #E51C1C
+        "image": {"url": image_url},
+        "footer": {"text": "Omarchy · The Economist HUD"}
+    }
+
+    payload = {
+        "content": "📰 **The Economist** new weekly edition dropped!",
+        "embeds": [embed]
+    }
+
+    try:
+        req = urllib.request.Request(
+            webhook_url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": USER_AGENT}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status in (200, 204)
+    except Exception as e:
+        sys.stderr.write(f"Discord post error: {e}\n")
+        return False
+
+
+def main():
+    parser = argparse.ArgumentParser(description="The Economist cover & weekly briefing backend")
+    parser.add_argument("command", choices=["json", "refresh", "discord", "cache-cover"], default="json", nargs="?")
+    parser.add_argument("--date", help="Specific issue date (YYYY-MM-DD) for cache-cover")
+    args = parser.parse_args()
+
+    if args.command in ("json", "refresh"):
+        res = fetch_latest_data(force=(args.command == "refresh"))
+        print(json.dumps(res, indent=2))
+    elif args.command == "discord":
+        success = send_to_discord()
+        print(json.dumps({"success": success}))
+    elif args.command == "cache-cover":
+        if args.date:
+            ymd = args.date.replace("-", "")
+            img_url = f"https://www.economist.com/cdn-cgi/image/width=1200,quality=85,format=auto/content-assets/images/{ymd}_DE_US.jpg"
+            dest = os.path.join(COVERS_DIR, f"{ymd}_DE_US.jpg")
+            ok = download_image(img_url, dest)
+            print(json.dumps({"success": ok, "path": dest if ok else ""}))
+
+
+if __name__ == "__main__":
+    main()

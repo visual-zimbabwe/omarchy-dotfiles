@@ -225,10 +225,11 @@ fi
 
 # D. Restore Omarchy Widget State & Layouts
 if [[ -d "state" ]]; then
-  echo -e "--> Restoring Omarchy state & widget layouts (Omafinance, workspaces, omanki)..."
-  mkdir -p "$HOME/.local/state/omarchy/settings" "$HOME/.local/state/omarchy/workspace-layouts"
+  echo -e "--> Restoring Omarchy state & widget layouts (Omafinance, workspaces, omanki, economist)..."
+  mkdir -p "$HOME/.local/state/omarchy/settings" "$HOME/.local/state/omarchy/workspace-layouts" "$HOME/.local/state/omarchy/economist"
   [[ -f "state/settings/finance.json" ]] && cp -f "state/settings/finance.json" "$HOME/.local/state/omarchy/settings/"
   [[ -f "state/omanki.json" ]] && cp -f "state/omanki.json" "$HOME/.local/state/omarchy/"
+  [[ -f "state/economist/config.json" ]] && cp -f "state/economist/config.json" "$HOME/.local/state/omarchy/economist/"
   [[ -f "state/omagotchi-settings.json" ]] && cp -f "state/omagotchi-settings.json" "$HOME/.local/state/omarchy/"
   [[ -f "state/key-promoter.json" ]] && cp -f "state/key-promoter.json" "$HOME/.local/state/omarchy/"
   if [[ -d "state/workspace-layouts" ]]; then
