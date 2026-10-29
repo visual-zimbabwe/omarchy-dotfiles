@@ -124,6 +124,11 @@ for desktop in OmaThonny.desktop trova.desktop android-studio.desktop; do
   [[ -f "$HOME_DIR/.local/share/applications/$desktop" ]] && cp -f "$HOME_DIR/.local/share/applications/$desktop" "$REPO_DIR/applications/"
 done
 
+# 7. Export Application Data (~/.local/share)
+echo -e "${GREEN}--> Exporting application data (~/.local/share)...${RESET}"
+mkdir -p "$REPO_DIR/share/omanki"
+[[ -f "$HOME_DIR/.local/share/omanki/cards.json" ]] && cp -f "$HOME_DIR/.local/share/omanki/cards.json" "$REPO_DIR/share/omanki/"
+
 echo -e "\n${BOLD}${GREEN}✔ System state synced successfully!${RESET}"
 echo -e "You can now commit and push the latest configuration:"
 echo -e "  git add ."

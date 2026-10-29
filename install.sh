@@ -243,6 +243,13 @@ if [[ -d "applications" ]]; then
   cp -rf applications/* "$HOME/.local/share/applications/" 2>/dev/null || true
 fi
 
+# F. Restore Application Data (~/.local/share)
+if [[ -d "share" ]]; then
+  echo -e "--> Restoring application data (Omanki cards, etc.)..."
+  mkdir -p "$HOME/.local/share/omanki"
+  [[ -f "share/omanki/cards.json" ]] && cp -f "share/omanki/cards.json" "$HOME/.local/share/omanki/"
+fi
+
 # Fix permissions
 chmod 700 "$HOME/.config/cliamp" 2>/dev/null || true
 
