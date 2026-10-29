@@ -250,6 +250,15 @@ if [[ -d "share" ]]; then
   [[ -f "share/omanki/cards.json" ]] && cp -f "share/omanki/cards.json" "$HOME/.local/share/omanki/"
 fi
 
+# G. Restore Companion Plugin Services (Surrey Rental Finder)
+if [[ ! -d "$HOME/surrey-rental-finder" ]]; then
+  echo -e "--> Setting up surrey-rental-finder service..."
+  git clone -b fix/venv-runner-and-error-handling https://github.com/visual-zimbabwe/surrey-rental-finder.git "$HOME/surrey-rental-finder" 2>/dev/null || true
+  if [[ -f "$HOME/surrey-rental-finder/requirements.txt" ]] && command -v uv &>/dev/null; then
+    (cd "$HOME/surrey-rental-finder" && uv venv .venv && source .venv/bin/activate && uv pip install -r requirements.txt) 2>/dev/null || true
+  fi
+fi
+
 # Fix permissions
 chmod 700 "$HOME/.config/cliamp" 2>/dev/null || true
 
