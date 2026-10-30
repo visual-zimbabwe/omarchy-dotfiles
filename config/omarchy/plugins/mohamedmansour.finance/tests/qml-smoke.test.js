@@ -18,7 +18,8 @@ const qmlFiles = [
   "GridSplitter.qml",
   "GridCell.qml",
   "GridWindow.qml",
-  "SectorBreadthWindow.qml"
+  "SectorBreadthWindow.qml",
+  "StratAttackWindow.qml"
 ]
 
 test("all plugin QML files parse with qmlformat", () => {
@@ -489,6 +490,16 @@ test("fetch-holdings-strat script exists and exports holdings strat pipeline", (
   assert.match(scriptContent, /Model\.computeHoldingsStratMap/)
 })
 
+test("fetch-etf-holdings script exists and integrates with SEC EDGAR dynamic discovery", () => {
+  const scriptPath = path.join(__dirname, "..", "scripts", "fetch-etf-holdings.js")
+  assert.ok(fs.existsSync(scriptPath))
+  const scriptContent = fs.readFileSync(scriptPath, "utf8")
+  assert.match(scriptContent, /company_tickers_mf\.json/)
+  assert.match(scriptContent, /efts\.sec\.gov/)
+  assert.match(scriptContent, /openfigi\.com/)
+  assert.match(scriptContent, /Model\.parseNportXml/)
+})
+
 test("grid cells provide live 9-rule Strat checklist text status on execution timeframe with localized inspector popup", () => {
   const popup = fs.readFileSync(source("StratChecklistPopup.qml"), "utf8")
   const grid = fs.readFileSync(source("GridWindow.qml"), "utf8")
@@ -578,6 +589,47 @@ test("grid window and panel persist cellTimeframes across state and layouts and 
   assert.match(cell, /signal replayRequested\(real timestamp\)/)
   assert.match(chart, /signal replayRequested\(real timestamp\)/)
 })
+
+test("panel, list view, and detail view integrate StratAttackWindow and attack scanner", () => {
+  const panel = fs.readFileSync(source("Panel.qml"), "utf8")
+  const listView = fs.readFileSync(source("FinanceListView.qml"), "utf8")
+  const detailView = fs.readFileSync(source("FinanceDetailView.qml"), "utf8")
+  const attackWin = fs.readFileSync(source("StratAttackWindow.qml"), "utf8")
+
+  assert.match(panel, /property var activeAttackWindow:\s*null/)
+  assert.match(panel, /function openStratAttack\(\)/)
+  assert.match(panel, /stratAttackWindowComponent\.createObject/)
+  assert.match(panel, /id:\s*stratAttackWindowComponent/)
+  assert.match(panel, /StratAttackWindow\s*\{/)
+
+  assert.match(listView, /id:\s*attackBtn/)
+  assert.match(listView, /tooltipText:\s*"TheStrat Attack Scanner"/)
+  assert.match(listView, /controller\.openStratAttack\(\)/)
+
+  assert.match(detailView, /id:\s*holdingsAttackLink/)
+  assert.match(detailView, /controller\.openStratAttack\(\)/)
+
+  assert.match(attackWin, /title:\s*"Omafinance - TheStrat Attack Scanner"/)
+  assert.match(attackWin, /Model\.nodeCommand\(scriptPath\)/)
+  assert.match(attackWin, /id:\s*attackRunnerProc/)
+  assert.match(attackWin, /property var attackData:/)
+  assert.match(attackWin, /property var topBullish:/)
+  assert.match(attackWin, /property var topBearish:/)
+  assert.match(attackWin, /property var topLaggards:/)
+})
+
+test("fetch-attack runner exists and produces structured basket attack output", () => {
+  const scriptPath = path.join(root, "scripts", "fetch-attack.js")
+  assert.ok(fs.existsSync(scriptPath), "scripts/fetch-attack.js should exist")
+  const code = fs.readFileSync(scriptPath, "utf8")
+  assert.match(code, /Model\.allAttackBasketsList\(\)/)
+  assert.match(code, /resolveEtfHoldings/)
+  assert.match(code, /Model\.computeBasketAttackMetrics/)
+  assert.match(code, /topBullishAttacks/)
+  assert.match(code, /topBearishAttacks/)
+  assert.match(code, /topLaggards/)
+})
+
 
 
 
