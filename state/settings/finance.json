@@ -32,17 +32,17 @@
   "detailRange": "60",
   "gridMode": "2+3",
   "gridSync": {
-    "crosshair": false,
     "symbol": true,
-    "time": false,
-    "timeframe": false
+    "timeframe": false,
+    "crosshair": false,
+    "time": false
   },
   "gridSymbols": [
-    "IWM",
-    "IWM",
-    "IWM",
-    "IWM",
-    "IWM"
+    "SMH",
+    "SMH",
+    "SMH",
+    "SMH",
+    "SMH"
   ],
   "gridTimeframes": [
     "30",
@@ -52,9 +52,9 @@
     "1M"
   ],
   "gridZooms": [
-    23,
     8,
-    33,
+    8,
+    18,
     8,
     8
   ],
@@ -180,7 +180,7 @@
           "zooms": [
             8,
             8,
-            8,
+            18,
             8,
             8
           ],
@@ -246,7 +246,7 @@
       ]
     }
   },
-  "breadthWeightMode": "cap",
+  "breadthWeightMode": "equal",
   "breadthSortTimeframe": "1W",
   "breadthSortAsc": false,
   "discordWebhook": "https://discord.com/api/webhooks/1555025989363310644/M0JepOpRsNNPbR_Ykk_-kgxc8plFo2Mfp7j0t_-Y7dv92osFqVITTKc5NcJ_qYA2v_TR"
