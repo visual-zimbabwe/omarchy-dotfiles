@@ -34,10 +34,10 @@
   "detailRange": "1M",
   "gridMode": "2+3",
   "gridSync": {
-    "symbol": true,
-    "timeframe": false,
     "crosshair": false,
-    "time": false
+    "symbol": true,
+    "time": false,
+    "timeframe": false
   },
   "gridSymbols": [
     "SMH",
