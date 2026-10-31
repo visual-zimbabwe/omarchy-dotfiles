@@ -153,8 +153,7 @@
       "fill": "largest",
       "underfill": "rescale",
       "weights": [
-        12.5,
-        12.5,
+        25,
         25,
         25,
         25
@@ -170,11 +169,10 @@
       "fill": "largest",
       "underfill": "rescale",
       "weights": [
-        20,
-        20,
-        20,
-        20,
-        20
+        33.33,
+        33.33,
+        16.67,
+        16.67
       ],
       "gridColumns": 0
     }

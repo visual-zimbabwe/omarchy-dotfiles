@@ -1,5 +1,6 @@
 aether
 alsa-utils
+android-tools
 asdcontrol
 base
 base-devel
@@ -15,6 +16,7 @@ btrfs-progs
 chromium
 clang
 cliamp
+cronie
 cups
 cups-filters
 cups-pk-helper
@@ -52,6 +54,7 @@ gvfs-mtp
 gvfs-nfs
 gvfs-smb
 herdr
+html-xml-utils
 hyprland
 hyprland-guiutils
 hyprland-preview-share-picker
@@ -71,9 +74,11 @@ kernel-modules-hook
 lazydocker
 lazygit
 less
+lib32-nvidia-utils
 libfprint
 libpulse
 libreoffice-fresh
+libva-nvidia-driver
 libvips
 libyaml
 limine
@@ -101,8 +106,11 @@ noto-fonts
 noto-fonts-cjk
 noto-fonts-emoji
 nss-mdns
-obsidian
+ntfs-3g
+nvidia-open-dkms
+nvidia-utils
 obs-studio
+obsidian
 omacalc
 omacut
 omarchy
@@ -133,7 +141,9 @@ slurp
 socat
 sof-firmware
 spotify
+squashfs-tools
 starship
+streamlink
 sudo
 sushi
 system-config-printer
@@ -154,10 +164,12 @@ ufw
 ufw-docker
 usage
 usbutils
+uv
 uwsm
 visual-studio-code-bin
 vpl-gpu-rt
 vulkan-intel
+w3m
 whois
 wireless-regdb
 wireplumber
