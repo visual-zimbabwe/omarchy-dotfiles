@@ -49,11 +49,11 @@
     "timeframe": false
   },
   "gridSymbols": [
-    "OIH",
-    "OIH",
-    "OIH",
-    "OIH",
-    "OIH"
+    "NVDA",
+    "NVDA",
+    "NVDA",
+    "NVDA",
+    "NVDA"
   ],
   "gridSplits": {
     "2x2": {
@@ -253,7 +253,7 @@
   "gridZooms": [
     29,
     77,
-    54,
+    75,
     8,
     8
   ],
