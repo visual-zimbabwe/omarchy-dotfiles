@@ -28,15 +28,16 @@ function fetchHttps(url, headers) {
 }
 
 async function run() {
-  const baskets = Model.allAttackBasketsList();
+  const focusPairsMap = Model.focusBasketPairs();
+  const focusBasketSymbols = ["XLC", "SMH"];
 
-  // 1. Load or resolve holdings for all baskets in parallel
-  const holdingsPromises = baskets.map(async (b) => {
+  // 1. Resolve holdings for focus baskets (XLC, SMH)
+  const holdingsPromises = focusBasketSymbols.map(async (sym) => {
     try {
-      const parsed = await resolveEtfHoldings(b.symbol);
-      return { symbol: b.symbol, name: b.name, category: b.category, holdings: (parsed && parsed.holdings) ? parsed.holdings : [] };
+      const parsed = await resolveEtfHoldings(sym);
+      return { symbol: sym, name: sym === "XLC" ? "Communication Services" : "Semiconductors", holdings: (parsed && parsed.holdings) ? parsed.holdings : [] };
     } catch (e) {
-      return { symbol: b.symbol, name: b.name, category: b.category, holdings: [] };
+      return { symbol: sym, name: sym, holdings: [] };
     }
   });
 
@@ -57,125 +58,185 @@ async function run() {
     }
   }
 
-  // Also include the ETF symbols themselves to evaluate ETF-level attacks
-  for (const b of baskets) {
-    if (!symSeen[b.symbol]) {
-      symSeen[b.symbol] = true;
-      allSyms.push(b.symbol);
+  // Ensure focus tickers and peers are included
+  const requiredSymbols = ["GOOGL", "META", "NVDA", "TSM", "XLC", "SMH"];
+  for (const s of requiredSymbols) {
+    if (!symSeen[s]) {
+      symSeen[s] = true;
+      allSyms.push(s);
     }
   }
 
-  // 2. Fetch full OHLC daily candles (3mo) per symbol in parallel and derive weekly candles
   const dailyMap = {};
   const weeklyMap = {};
-  const concurrency = 20;
-  let symIdx = 0;
+  const tf30Map = {};
+  const tf60Map = {};
+  const monthlyMap = {};
+  const concurrency = 15;
 
-  async function worker() {
-    while (symIdx < allSyms.length) {
-      const sym = allSyms[symIdx++];
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=3mo&includePrePost=false`;
-      const res = await fetchHttps(url, { "User-Agent": "Mozilla/5.0" });
-      if (res.ok && res.data) {
-        try {
+  // 2. Fetch Daily candles (3mo) and derive Weekly & Monthly
+  let dIdx = 0;
+  async function dailyWorker() {
+    while (dIdx < allSyms.length) {
+      const sym = allSyms[dIdx++];
+      try {
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=3mo&includePrePost=false`;
+        const res = await fetchHttps(url, { "User-Agent": "Mozilla/5.0" });
+        if (res.ok && res.data) {
           const j = JSON.parse(res.data);
           const r = j && j.chart && j.chart.result && j.chart.result[0];
           if (r && r.timestamp && r.indicators) {
             const daily = Model.parseCandles(r.timestamp, r.indicators);
             dailyMap[sym] = daily;
             weeklyMap[sym] = Model.mergePeriodCandles(daily, "1W");
+            monthlyMap[sym] = Model.mergePeriodCandles(daily, "1M");
           }
-        } catch (e) {}
+        }
+      } catch (e) {}
+    }
+  }
+
+  // 3. Fetch 30m candles (5d) and 60m candles (1mo)
+  let iIdx = 0;
+  async function intradayWorker() {
+    while (iIdx < allSyms.length) {
+      const sym = allSyms[iIdx++];
+
+      // 30m
+      try {
+        const u30 = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=30m&range=5d&includePrePost=false`;
+        const res30 = await fetchHttps(u30, { "User-Agent": "Mozilla/5.0" });
+        if (res30.ok && res30.data) {
+          const j30 = JSON.parse(res30.data);
+          const r30 = j30 && j30.chart && j30.chart.result && j30.chart.result[0];
+          if (r30 && r30.timestamp && r30.indicators) {
+            tf30Map[sym] = Model.parseCandles(r30.timestamp, r30.indicators);
+          }
+        }
+      } catch (e) {}
+
+      // 60m (or derive from 30m)
+      try {
+        const u60 = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=60m&range=1mo&includePrePost=false`;
+        const res60 = await fetchHttps(u60, { "User-Agent": "Mozilla/5.0" });
+        if (res60.ok && res60.data) {
+          const j60 = JSON.parse(res60.data);
+          const r60 = j60 && j60.chart && j60.chart.result && j60.chart.result[0];
+          if (r60 && r60.timestamp && r60.indicators) {
+            tf60Map[sym] = Model.parseCandles(r60.timestamp, r60.indicators);
+          }
+        }
+      } catch (e) {}
+      if (!tf60Map[sym] && tf30Map[sym]) {
+        tf60Map[sym] = Model.mergePeriodCandles(tf30Map[sym], "60");
       }
     }
   }
 
-  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  await Promise.all([
+    ...Array.from({ length: concurrency }, () => dailyWorker()),
+    ...Array.from({ length: concurrency }, () => intradayWorker())
+  ]);
 
-  // 3. Compute Attack Metrics per Basket for Daily and Weekly timeframes
-  const evaluatedDailyBaskets = [];
-  const evaluatedWeeklyBaskets = [];
-  const allDailyLaggards = [];
-  const allWeeklyLaggards = [];
+  // 4. Compute Focus Pairs Multi-Timeframe metrics (30m, 60m, 1D, 1W, 1M)
+  const focusTfs = ["30", "60", "1D", "1W", "1M"];
+  const tfMaps = {
+    "30": tf30Map,
+    "60": tf60Map,
+    "1D": dailyMap,
+    "1W": weeklyMap,
+    "1M": monthlyMap
+  };
 
-  for (const b of baskets) {
-    const data = basketsMap[b.symbol];
-    const holdings = data ? data.holdings : [];
+  const focusPairsOutput = {};
+  for (const sym of Object.keys(focusPairsMap)) {
+    const pair = focusPairsMap[sym];
+    const bData = basketsMap[pair.basket];
+    const holdings = bData ? bData.holdings : [];
+    const tfDetails = {};
 
-    // Daily metrics
-    const dailyMetrics = Model.computeBasketAttackMetrics(b.symbol, b.name, b.category, holdings, dailyMap, null, "1D");
-    const etfDaily = dailyMap[b.symbol];
-    if (etfDaily && etfDaily.length >= 2) {
-      dailyMetrics.etfAttack = Model.detectStratAttack(etfDaily);
-      dailyMetrics.wtd = Model.extractWtdDailyCandles(etfDaily, null, dailyMetrics.etfAttack.triggerPrice, dailyMetrics.etfAttack.direction, "1D");
-    } else {
-      dailyMetrics.etfAttack = { attackType: "none", direction: "neutral", state: "none", label: "-" };
-      dailyMetrics.wtd = { candles: [], weekHigh: 0, weekLow: 0, triggerPrice: 0, triggerDirection: "neutral" };
+    for (const tf of focusTfs) {
+      const cMap = tfMaps[tf] || {};
+      const bMetrics = Model.computeBasketAttackMetrics(pair.basket, bData ? bData.name : pair.basket, "Sector", holdings, cMap, null, tf);
+
+      // Key peer scenario & price
+      const peerCandles = cMap[pair.peer];
+      let peerInfo = { symbol: pair.peer, scenario: "-", color: "-", price: null, inForce: "-" };
+      if (peerCandles && peerCandles.length >= 2) {
+        const pLast = peerCandles[peerCandles.length - 1];
+        const pPrev = peerCandles[peerCandles.length - 2];
+        const sc = Model.stratScenario(pLast, pPrev);
+        const col = Number(pLast.close) >= Number(pLast.open) ? "G" : "R";
+        let inf = "-";
+        if (sc === "2u") inf = Number(pLast.close) >= Number(pPrev.high) ? "In-Force" : "Triggered";
+        else if (sc === "2d") inf = Number(pLast.close) <= Number(pPrev.low) ? "In-Force" : "Triggered";
+        else if (sc === "1") inf = "Inside Bar";
+        peerInfo = {
+          symbol: pair.peer,
+          scenario: sc,
+          color: col,
+          price: Number(pLast.close),
+          inForce: inf
+        };
+      }
+
+      tfDetails[tf] = {
+        basket: pair.basket,
+        timeframe: tf,
+        status: bMetrics.status,
+        pct2u: bMetrics.pct2u,
+        pct2d: bMetrics.pct2d,
+        pctAttack2u: bMetrics.pctAttack2u,
+        pctAttack2d: bMetrics.pctAttack2d,
+        count2u: bMetrics.count2u,
+        count2d: bMetrics.count2d,
+        totalHoldings: bMetrics.totalHoldings,
+        peer: peerInfo
+      };
     }
 
-    // Weekly metrics
-    const weeklyMetrics = Model.computeBasketAttackMetrics(b.symbol, b.name, b.category, holdings, weeklyMap, null, "1W");
-    const etfWeekly = weeklyMap[b.symbol];
-    if (etfWeekly && etfWeekly.length >= 2) {
-      weeklyMetrics.etfAttack = Model.detectStratAttack(etfWeekly);
-      weeklyMetrics.wtd = Model.extractWtdDailyCandles(etfWeekly, null, weeklyMetrics.etfAttack.triggerPrice, weeklyMetrics.etfAttack.direction, "1W");
-    } else {
-      weeklyMetrics.etfAttack = { attackType: "none", direction: "neutral", state: "none", label: "-" };
-      weeklyMetrics.wtd = { candles: [], weekHigh: 0, weekLow: 0, triggerPrice: 0, triggerDirection: "neutral" };
-    }
-
-    // Cross-link summary indicators
-    dailyMetrics.weeklyAttackPct = weeklyMetrics.pctAttack2u > weeklyMetrics.pctAttack2d ? weeklyMetrics.pctAttack2u : -weeklyMetrics.pctAttack2d;
-    dailyMetrics.weeklyStatus = weeklyMetrics.status;
-    weeklyMetrics.dailyAttackPct = dailyMetrics.pctAttack2u > dailyMetrics.pctAttack2d ? dailyMetrics.pctAttack2u : -dailyMetrics.pctAttack2d;
-    weeklyMetrics.dailyStatus = dailyMetrics.status;
-
-    evaluatedDailyBaskets.push(dailyMetrics);
-    evaluatedWeeklyBaskets.push(weeklyMetrics);
-
-    for (const lag of dailyMetrics.laggards) {
-      allDailyLaggards.push(Object.assign({ parentBasket: b.symbol, basketStatus: dailyMetrics.status }, lag));
-    }
-    for (const lag of weeklyMetrics.laggards) {
-      allWeeklyLaggards.push(Object.assign({ parentBasket: b.symbol, basketStatus: weeklyMetrics.status }, lag));
-    }
+    focusPairsOutput[sym] = {
+      symbol: sym,
+      basket: pair.basket,
+      peer: pair.peer,
+      timeframes: tfDetails
+    };
   }
 
-  const sortedDailyBaskets = Model.sortAttackBaskets(evaluatedDailyBaskets, "attack", false);
-  const sortedWeeklyBaskets = Model.sortAttackBaskets(evaluatedWeeklyBaskets, "attack", false);
+  // 5. Package Focus Basket Constituent Candle Histories for dynamic Replay
+  const focusCandles = {
+    "30": {},
+    "60": {},
+    "1D": {},
+    "1W": {},
+    "1M": {}
+  };
+  for (const s of allSyms) {
+    if (tf30Map[s]) focusCandles["30"][s] = tf30Map[s];
+    if (tf60Map[s]) focusCandles["60"][s] = tf60Map[s];
+    if (dailyMap[s]) focusCandles["1D"][s] = dailyMap[s];
+    if (weeklyMap[s]) focusCandles["1W"][s] = weeklyMap[s];
+    if (monthlyMap[s]) focusCandles["1M"][s] = monthlyMap[s];
+  }
 
-  const topBullishDaily = sortedDailyBaskets.filter(b => b.pctAttack2u > 0 || b.pct2u >= 60).slice(0, 5);
-  const topBearishDaily = sortedDailyBaskets.filter(b => b.pctAttack2d > 0 || b.pct2d >= 60).slice(0, 5);
-
-  const topBullishWeekly = sortedWeeklyBaskets.filter(b => b.pctAttack2u > 0 || b.pct2u >= 60).slice(0, 5);
-  const topBearishWeekly = sortedWeeklyBaskets.filter(b => b.pctAttack2d > 0 || b.pct2d >= 60).slice(0, 5);
-
-  allDailyLaggards.sort((a, b) => (a.distToTriggerPct != null ? a.distToTriggerPct : 999) - (b.distToTriggerPct != null ? b.distToTriggerPct : 999));
-  const topDailyLaggards = allDailyLaggards.slice(0, 15);
-
-  allWeeklyLaggards.sort((a, b) => (a.distToTriggerPct != null ? a.distToTriggerPct : 999) - (b.distToTriggerPct != null ? b.distToTriggerPct : 999));
-  const topWeeklyLaggards = allWeeklyLaggards.slice(0, 15);
+  const focusHoldings = {};
+  for (const fb of focusBasketSymbols) {
+    const bData = basketsMap[fb];
+    focusHoldings[fb] = (bData && bData.holdings) ? bData.holdings : [];
+  }
 
   const output = {
     timestamp: Date.now(),
-    daily: {
-      baskets: sortedDailyBaskets,
-      topBullishAttacks: topBullishDaily,
-      topBearishAttacks: topBearishDaily,
-      topLaggards: topDailyLaggards
-    },
-    weekly: {
-      baskets: sortedWeeklyBaskets,
-      topBullishAttacks: topBullishWeekly,
-      topBearishAttacks: topBearishWeekly,
-      topLaggards: topWeeklyLaggards
-    },
-    // Backwards compatibility with existing root properties
-    baskets: sortedDailyBaskets,
-    topBullishAttacks: topBullishDaily,
-    topBearishAttacks: topBearishDaily,
-    topLaggards: topDailyLaggards
+    focusPairs: focusPairsOutput,
+    focusCandles: focusCandles,
+    focusHoldings: focusHoldings
   };
+
+  try {
+    const cacheDir = path.join(process.env.HOME || "/home/juwimana", ".cache", "omafinance");
+    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(path.join(cacheDir, "attack.json"), JSON.stringify(output), "utf8");
+  } catch (e) {}
 
   process.stdout.write(JSON.stringify(output));
 }

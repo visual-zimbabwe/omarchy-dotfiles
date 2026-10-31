@@ -15,7 +15,7 @@ function defaultGridMode() {
 }
 
 function defaultGridSync() {
-  return { symbol: true, timeframe: false, crosshair: true, time: true }
+  return { symbol: true, timeframe: false, crosshair: true, time: true, broadening: false }
 }
 
 function defaultGridSplits() {
@@ -197,9 +197,6 @@ function parseState(raw) {
     if (gZooms) res.gridZooms = gZooms
     if (data.gridSplits !== undefined && typeof data.gridSplits === "object") res.gridSplits = data.gridSplits
     if (data.layouts !== undefined && typeof data.layouts === "object") res.layouts = parseLayouts(data.layouts)
-    if (data.breadthWeightMode === "cap" || data.breadthWeightMode === "equal") res.breadthWeightMode = data.breadthWeightMode
-    if (data.breadthSortTimeframe !== undefined) res.breadthSortTimeframe = String(data.breadthSortTimeframe)
-    if (data.breadthSortAsc !== undefined) res.breadthSortAsc = !!data.breadthSortAsc
     if (data.discordWebhook !== undefined) res.discordWebhook = String(data.discordWebhook || "").trim()
     return res
   } catch (e) {
@@ -207,7 +204,7 @@ function parseState(raw) {
   }
 }
 
-function serializeState(watchlist, pinned, detailRange, gridMode, gridSync, gridSymbols, gridSplits, layouts, breadthWeightMode, breadthSortTimeframe, breadthSortAsc, discordWebhook, gridTimeframes, gridZooms) {
+function serializeState(watchlist, pinned, detailRange, gridMode, gridSync, gridSymbols, gridSplits, layouts, arg9, arg10, arg11, arg12, arg13, arg14) {
   var list = Array.isArray(watchlist) ? watchlist.slice() : []
   var obj = {
     watchlist: list,
@@ -217,16 +214,31 @@ function serializeState(watchlist, pinned, detailRange, gridMode, gridSync, grid
   if (gridMode !== undefined) obj.gridMode = gridMode
   if (gridSync !== undefined) obj.gridSync = gridSync
   if (gridSymbols !== undefined) obj.gridSymbols = gridSymbols
+  if (gridSplits !== undefined) obj.gridSplits = gridSplits
+  if (layouts !== undefined && layouts !== null && Object.keys(layouts).length > 0) obj.layouts = parseLayouts(layouts)
+
+  var discordWebhook = ""
+  var gridTimeframes = null
+  var gridZooms = null
+
+  if (typeof arg9 === "string" && (arg9.startsWith("http") || arg9 === "") && (Array.isArray(arg10) || Array.isArray(arg11))) {
+    discordWebhook = arg9
+    gridTimeframes = arg10
+    gridZooms = arg11
+  } else if (arguments.length >= 12) {
+    discordWebhook = arg12
+    gridTimeframes = arg13
+    gridZooms = arg14
+  } else if (typeof arg9 === "string" && arg9.startsWith("http")) {
+    discordWebhook = arg9
+  }
+
   var normTfs = normalizeTimeframeList(gridTimeframes)
   if (normTfs) obj.gridTimeframes = normTfs
   var normZooms = normalizeZoomList(gridZooms)
   if (normZooms) obj.gridZooms = normZooms
-  if (gridSplits !== undefined) obj.gridSplits = gridSplits
-  if (layouts !== undefined && layouts !== null && Object.keys(layouts).length > 0) obj.layouts = parseLayouts(layouts)
-  if (breadthWeightMode !== undefined) obj.breadthWeightMode = breadthWeightMode
-  if (breadthSortTimeframe !== undefined) obj.breadthSortTimeframe = breadthSortTimeframe
-  if (breadthSortAsc !== undefined) obj.breadthSortAsc = breadthSortAsc
-  if (discordWebhook !== undefined && discordWebhook !== "") obj.discordWebhook = discordWebhook
+  if (discordWebhook) obj.discordWebhook = discordWebhook
+
   return JSON.stringify(obj, null, 2) + "\n"
 }
 
@@ -342,7 +354,7 @@ function chartSpec(range) {
     case "1W": return { range: "5y", interval: "1wk" }
     case "1M": return { range: "10y", interval: "1mo" }
     case "1Y": return { range: "max", interval: "1mo" }
-    default: return { range: "1y", interval: "1d" }
+    default: return { period1: 0, period2: 9999999999, interval: "1d" }
   }
 }
 
@@ -420,6 +432,14 @@ function yahooChartUrl(symbol, rangeKey) {
   var sym = normalizeSymbol(symbol)
   var spec = chartSpec(rangeKey)
   var prepost = "false"
+  if (spec.period1 !== undefined && spec.period2 !== undefined) {
+    return "https://query1.finance.yahoo.com/v8/finance/chart/"
+      + encodeURIComponent(sym)
+      + "?period1=" + spec.period1
+      + "&period2=" + spec.period2
+      + "&interval=" + spec.interval
+      + "&includePrePost=" + prepost
+  }
   return "https://query1.finance.yahoo.com/v8/finance/chart/"
     + encodeURIComponent(sym)
     + "?range=" + spec.range
@@ -2130,8 +2150,6 @@ function computeStratDetails(candles, liveQuote) {
   }
   var sequence = seqParts.length > 0 ? seqParts.join("-") : "-"
 
-  var binary = computeStratBinaryDetails(candles, liveQuote)
-
   return {
     bar: bar,
     polarity: polarity,
@@ -2142,10 +2160,7 @@ function computeStratDetails(candles, liveQuote) {
     open: isFinite(curOpen) ? curOpen : null,
     high: isFinite(curHigh) ? curHigh : null,
     low: isFinite(curLow) ? curLow : null,
-    close: isFinite(curClose) ? curClose : null,
-    bits: binary.bits,
-    bitColor: binary.color,
-    bitTooltip: binary.tooltip
+    close: isFinite(curClose) ? curClose : null
   }
 }
 
@@ -3017,57 +3032,6 @@ function sortHoldings(holdings, sortKey, sortAsc, stratMap) {
   return list
 }
 
-function allSpdrSectorsList() {
-  return [
-    { symbol: "XLC", name: "Communication Services", seriesId: "S000062095" },
-    { symbol: "XLY", name: "Consumer Discretionary", seriesId: "S000006408" },
-    { symbol: "XLP", name: "Consumer Staples", seriesId: "S000006409" },
-    { symbol: "XLE", name: "Energy", seriesId: "S000006410" },
-    { symbol: "XLF", name: "Financials", seriesId: "S000006411" },
-    { symbol: "XLV", name: "Health Care", seriesId: "S000006412" },
-    { symbol: "XLI", name: "Industrials", seriesId: "S000006413" },
-    { symbol: "XLB", name: "Materials", seriesId: "S000006414" },
-    { symbol: "XLK", name: "Technology", seriesId: "S000006415" },
-    { symbol: "XLU", name: "Utilities", seriesId: "S000006416" },
-    { symbol: "XLRE", name: "Real Estate", seriesId: "S000051152" }
-  ]
-}
-
-function sparkCandlesUrl(symbols, interval, range) {
-  var syms = Array.isArray(symbols) ? symbols : [symbols]
-  var clean = []
-  for (var i = 0; i < syms.length; i++) {
-    var s = normalizeSymbol(syms[i])
-    if (s && clean.indexOf(s) === -1) clean.push(s)
-  }
-  if (clean.length === 0) return ""
-  var iv = interval || "1d"
-  var rg = range || "2y"
-  return "https://query1.finance.yahoo.com/v7/finance/spark?symbols=" + clean.join(",") + "&range=" + rg + "&interval=" + iv + "&includePrePost=false"
-}
-
-function parseSparkCandles(rawJson, interval) {
-  var out = {}
-  try {
-    var data = typeof rawJson === "string" ? JSON.parse(rawJson) : (rawJson || {})
-    var results = data.spark && data.spark.result ? data.spark.result : []
-    for (var i = 0; i < results.length; i++) {
-      var item = results[i]
-      var sym = normalizeSymbol(item && item.symbol)
-      var resp = item && item.response && item.response[0] ? item.response[0] : null
-      if (!sym || !resp) continue
-      var candles = parseCandles(resp.timestamp, resp.indicators)
-      if (candles.length === 0) continue
-      if (interval === "60m" || interval === "60" || interval === "1h") {
-        out[sym] = mergePeriodCandles(candles, "60")
-      } else {
-        out[sym] = candles
-      }
-    }
-  } catch (e) {}
-  return out
-}
-
 function prepareConstituentCandles(dailyCandlesMap) {
   var prepared = {}
   if (!dailyCandlesMap) return prepared
@@ -3124,151 +3088,6 @@ function computeHoldingsStratMap(holdings, hourlyCandlesMap, dailyCandlesMap, li
     map[sym] = computeHoldingStratMatrix(sym, prepared, hourlyCandlesMap, quote)
   }
   return map
-}
-
-function computeSectorBreadthMetrics(holdings, hourlyCandlesMap, dailyCandlesMap, weightMode, preparedCandles) {
-  var tfs = ["60", "1D", "1W", "1M", "1Y"]
-  var res = {}
-  var isCapWeight = (weightMode === "cap")
-  var list = Array.isArray(holdings) ? holdings : []
-  var prepared = preparedCandles || prepareConstituentCandles(dailyCandlesMap)
-
-  for (var t = 0; t < tfs.length; t++) {
-    var tf = tfs[t]
-    var count2u = 0
-    var count2d = 0
-    var countOther = 0
-    var totalCount = 0
-    var sum2u = 0
-    var sum2d = 0
-    var sumOther = 0
-    var totalWeight = 0
-
-    for (var i = 0; i < list.length; i++) {
-      var h = list[i]
-      if (!h || h.delisted) continue
-      var sym = normalizeSymbol(h.symbol)
-      if (!sym) continue
-
-      var candles = null
-      if (tf === "60") {
-        candles = hourlyCandlesMap ? hourlyCandlesMap[sym] : null
-      } else {
-        var p = prepared[sym]
-        candles = p ? p[tf] : null
-      }
-
-      if (!candles || candles.length < 2) continue
-
-      var current = candles[candles.length - 1]
-      var prev = candles[candles.length - 2]
-      var sc = stratScenario(current, prev)
-
-      if (sc === "-") continue
-
-      var w = 1
-      if (isCapWeight) {
-        var pct = Number(h.pctVal)
-        if (isFinite(pct) && pct > 0) {
-          w = pct
-        } else {
-          var val = Number(h.valUSD)
-          w = (isFinite(val) && val > 0) ? val : 1
-        }
-      }
-
-      totalCount++
-      totalWeight += w
-
-      if (sc === "2u") {
-        count2u++
-        sum2u += w
-      } else if (sc === "2d") {
-        count2d++
-        sum2d += w
-      } else {
-        countOther++
-        sumOther += w
-      }
-    }
-
-    var pct2u = 0
-    var pct2d = 0
-    var pctOther = 0
-    var netDelta = 0
-
-    if (totalWeight > 0) {
-      pct2u = (sum2u / totalWeight) * 100
-      pct2d = (sum2d / totalWeight) * 100
-      pctOther = (sumOther / totalWeight) * 100
-      netDelta = pct2u - pct2d
-    }
-
-    res[tf] = {
-      pct2u: pct2u,
-      pct2d: pct2d,
-      pctOther: pctOther,
-      netDelta: netDelta,
-      count2u: count2u,
-      count2d: count2d,
-      countOther: countOther,
-      totalCount: totalCount,
-      totalWeight: totalWeight
-    }
-  }
-
-  return res
-}
-
-function computeAllSectorsBreadth(sectorsHoldingsMap, hourlyCandlesMap, dailyCandlesMap, weightMode) {
-  var sectors = allSpdrSectorsList()
-  var prepared = prepareConstituentCandles(dailyCandlesMap)
-  var out = []
-  for (var i = 0; i < sectors.length; i++) {
-    var sec = sectors[i]
-    var sym = sec.symbol
-    var holdingsData = sectorsHoldingsMap ? sectorsHoldingsMap[sym] : null
-    var holdings = (holdingsData && holdingsData.holdings) ? holdingsData.holdings : (Array.isArray(holdingsData) ? holdingsData : [])
-    var tfMetrics = computeSectorBreadthMetrics(holdings, hourlyCandlesMap, dailyCandlesMap, weightMode, prepared)
-    out.push({
-      symbol: sym,
-      name: sec.name,
-      seriesId: sec.seriesId,
-      holdingsCount: holdings.length,
-      timeframes: tfMetrics
-    })
-  }
-  return out
-}
-
-function sortSectorBreadth(sectorsList, sortTimeframe, sortAsc) {
-  if (!Array.isArray(sectorsList)) return []
-  var list = sectorsList.slice()
-  var tf = sortTimeframe || "1Y"
-  var asc = !!sortAsc
-
-  list.sort(function (a, b) {
-    var aTf = (a && a.timeframes && a.timeframes[tf]) ? a.timeframes[tf] : null
-    var bTf = (b && b.timeframes && b.timeframes[tf]) ? b.timeframes[tf] : null
-    var aDelta = aTf ? Number(aTf.netDelta) : -9999
-    var bDelta = bTf ? Number(bTf.netDelta) : -9999
-    if (!isFinite(aDelta)) aDelta = -9999
-    if (!isFinite(bDelta)) bDelta = -9999
-
-    if (Math.abs(aDelta - bDelta) > 0.0001) {
-      return asc ? (aDelta - bDelta) : (bDelta - aDelta)
-    }
-    return String(a.symbol || "").localeCompare(String(b.symbol || ""))
-  })
-
-  return list
-}
-
-function formatNetDelta(val) {
-  var n = Number(val)
-  if (!isFinite(n)) return "0.0%"
-  var sign = n > 0 ? "+" : ""
-  return sign + n.toFixed(1) + "%"
 }
 
 function detectStratAttack(candles, liveQuote) {
@@ -3347,107 +3166,6 @@ function detectStratAttack(candles, liveQuote) {
   return emptyResult
 }
 
-function allAttackBasketsList() {
-  return [
-    { symbol: "SPY", name: "S&P 500 Index", category: "Index" },
-    { symbol: "QQQ", name: "Nasdaq 100 Index", category: "Index" },
-    { symbol: "IWM", name: "Russell 2000 Index", category: "Index" },
-    { symbol: "DIA", name: "Dow Jones 30", category: "Index" },
-    { symbol: "XLK", name: "Technology", category: "Sector" },
-    { symbol: "XLF", name: "Financials", category: "Sector" },
-    { symbol: "XLC", name: "Communication Services", category: "Sector" },
-    { symbol: "XLY", name: "Consumer Discretionary", category: "Sector" },
-    { symbol: "XLI", name: "Industrials", category: "Sector" },
-    { symbol: "XLV", name: "Health Care", category: "Sector" },
-    { symbol: "XLE", name: "Energy", category: "Sector" },
-    { symbol: "XLP", name: "Consumer Staples", category: "Sector" },
-    { symbol: "XLB", name: "Materials", category: "Sector" },
-    { symbol: "XLU", name: "Utilities", category: "Sector" },
-    { symbol: "XLRE", name: "Real Estate", category: "Sector" },
-    { symbol: "SMH", name: "Semiconductors", category: "Thematic" },
-    { symbol: "SOXX", name: "Semiconductors iShares", category: "Thematic" },
-    { symbol: "ARKG", name: "Genomics", category: "Thematic" },
-    { symbol: "ARKK", name: "Innovation", category: "Thematic" },
-    { symbol: "XBI", name: "Biotechnology", category: "Thematic" },
-    { symbol: "KRE", name: "Regional Banking", category: "Thematic" },
-    { symbol: "XOP", name: "Oil & Gas Exploration", category: "Thematic" },
-    { symbol: "GDX", name: "Gold Miners", category: "Thematic" },
-    { symbol: "XRT", name: "Retail", category: "Thematic" },
-    { symbol: "ITB", name: "Homebuilders", category: "Thematic" }
-  ]
-}
-
-function extractWtdDailyCandles(candles, liveQuote, triggerPrice, triggerDirection, timeframe) {
-  if (!Array.isArray(candles) || candles.length === 0) {
-    return { candles: [], weekHigh: 0, weekLow: 0, triggerPrice: 0, triggerDirection: "neutral" }
-  }
-
-  var tf = timeframe || "1D"
-  var cList = candles.slice()
-  var n = cList.length
-  var lastC = Object.assign({}, cList[n - 1])
-  var livePx = stratLivePrice(liveQuote)
-  if (livePx !== null && isFinite(livePx)) {
-    lastC.close = livePx
-    if (lastC.high === null || livePx > lastC.high) lastC.high = livePx
-    if (lastC.low === null || livePx < lastC.low) lastC.low = livePx
-  }
-  cList[n - 1] = lastC
-
-  var weekBars = []
-  if (tf === "1W") {
-    // Recent 5 weekly bars
-    weekBars = cList.slice(Math.max(0, n - 5))
-  } else {
-    // Current Week-To-Date daily bars starting Monday midnight
-    var dLast = new Date(lastC.timestamp * 1000)
-    var dayOfWeek = dLast.getUTCDay()
-    var daysSinceMon = (dayOfWeek + 6) % 7
-    var monMidnight = new Date(dLast.getTime() - daysSinceMon * 86400 * 1000)
-    monMidnight.setUTCHours(0, 0, 0, 0)
-    var monTs = Math.floor(monMidnight.getTime() / 1000)
-
-    weekBars = cList.filter(function(c) { return c && c.timestamp >= monTs; })
-    if (weekBars.length === 0) weekBars = [lastC]
-  }
-
-  var dayMap = ["Sun", "M", "T", "W", "Th", "F", "Sat"]
-  var wtdCandles = []
-  for (var i = 0; i < weekBars.length; i++) {
-    var c = weekBars[i]
-    var idx = cList.indexOf(c)
-    var prev = idx > 0 ? cList[idx - 1] : null
-    var sc = prev ? stratScenario(c, prev) : "-"
-    var d = new Date(c.timestamp * 1000)
-    var dayLabel = tf === "1W" ? ((d.getUTCMonth() + 1) + "/" + d.getUTCDate()) : (dayMap[d.getUTCDay()] || "-")
-    wtdCandles.push({
-      day: dayLabel,
-      timestamp: c.timestamp,
-      open: Number(c.open),
-      high: Number(c.high),
-      low: Number(c.low),
-      close: Number(c.close),
-      color: (Number(c.close) >= Number(c.open)) ? "G" : "R",
-      scenario: sc,
-      prevHigh: prev ? Number(prev.high) : null,
-      prevLow: prev ? Number(prev.low) : null
-    })
-  }
-
-  var highs = weekBars.map(function(c) { return Number(c.high); })
-  var lows = weekBars.map(function(c) { return Number(c.low); })
-  var weekHigh = Math.max.apply(null, highs)
-  var weekLow = Math.min.apply(null, lows)
-
-  return {
-    candles: wtdCandles,
-    weekHigh: weekHigh,
-    weekLow: weekLow,
-    triggerPrice: triggerPrice || null,
-    triggerDirection: triggerDirection || "neutral"
-  }
-}
-
 function computeBasketAttackMetrics(basketSymbol, basketName, category, holdings, dailyCandlesMap, liveQuotesMap, timeframe) {
   var tf = timeframe || "1D"
   var list = Array.isArray(holdings) ? holdings : []
@@ -3456,8 +3174,6 @@ function computeBasketAttackMetrics(basketSymbol, basketName, category, holdings
   var count2d = 0
   var countAttack2u = 0
   var countAttack2d = 0
-  var attackConstituents = []
-  var laggards = []
 
   for (var i = 0; i < list.length; i++) {
     var h = list[i]
@@ -3474,57 +3190,14 @@ function computeBasketAttackMetrics(basketSymbol, basketName, category, holdings
     var cLast = candles[candles.length - 1]
     var cPrev = candles[candles.length - 2]
     var s0 = stratScenario(cLast, cPrev)
-    var color0 = (cLast.close >= cLast.open) ? "G" : "R"
-    var price = stratLivePrice(quote) || cLast.close
 
     if (s0 === "2u") count2u++
     if (s0 === "2d") count2d++
 
     if (attack.direction === "bullish") {
       countAttack2u++
-      attackConstituents.push({
-        symbol: sym,
-        name: h.name || sym,
-        pctVal: h.pctVal || 0,
-        attackType: attack.attackType,
-        direction: "bullish",
-        consecutiveCount: attack.consecutiveCount,
-        triggerPrice: attack.triggerPrice,
-        price: price,
-        wtd: extractWtdDailyCandles(candles, quote, attack.triggerPrice, "bullish", tf)
-      })
     } else if (attack.direction === "bearish") {
       countAttack2d++
-      attackConstituents.push({
-        symbol: sym,
-        name: h.name || sym,
-        pctVal: h.pctVal || 0,
-        attackType: attack.attackType,
-        direction: "bearish",
-        consecutiveCount: attack.consecutiveCount,
-        triggerPrice: attack.triggerPrice,
-        price: price,
-        wtd: extractWtdDailyCandles(candles, quote, attack.triggerPrice, "bearish", tf)
-      })
-    } else {
-      var trigHigh = Number(cPrev.high)
-      var trigLow = Number(cPrev.low)
-      if (price && isFinite(price)) {
-        var distToHigh = trigHigh > 0 ? ((trigHigh - price) / trigHigh) * 100 : 999
-        var distToLow = trigLow > 0 ? ((price - trigLow) / trigLow) * 100 : 999
-        laggards.push({
-          symbol: sym,
-          name: h.name || sym,
-          pctVal: h.pctVal || 0,
-          scenario: s0,
-          color: color0,
-          price: price,
-          triggerHigh: trigHigh,
-          triggerLow: trigLow,
-          distToHighPct: distToHigh,
-          distToLowPct: distToLow
-        })
-      }
     }
   }
 
@@ -3549,33 +3222,6 @@ function computeBasketAttackMetrics(basketSymbol, basketName, category, holdings
     }
   }
 
-  var relevantLaggards = []
-  if (pct2u >= pct2d) {
-    relevantLaggards = laggards.filter(function(l) { return l.distToHighPct >= 0 && l.distToHighPct <= 3.5 }).map(function(l) {
-      var lCandles = dailyCandlesMap ? dailyCandlesMap[l.symbol] : null
-      var lQuote = liveQuotesMap ? liveQuotesMap[l.symbol] : null
-      return Object.assign({}, l, {
-        direction: "bullish",
-        distToTriggerPct: l.distToHighPct,
-        triggerPrice: l.triggerHigh,
-        wtd: extractWtdDailyCandles(lCandles, lQuote, l.triggerHigh, "bullish", tf)
-      })
-    })
-    relevantLaggards.sort(function(a, b) { return a.distToTriggerPct - b.distToTriggerPct })
-  } else {
-    relevantLaggards = laggards.filter(function(l) { return l.distToLowPct >= 0 && l.distToLowPct <= 3.5 }).map(function(l) {
-      var lCandles2 = dailyCandlesMap ? dailyCandlesMap[l.symbol] : null
-      var lQuote2 = liveQuotesMap ? liveQuotesMap[l.symbol] : null
-      return Object.assign({}, l, {
-        direction: "bearish",
-        distToTriggerPct: l.distToLowPct,
-        triggerPrice: l.triggerLow,
-        wtd: extractWtdDailyCandles(lCandles2, lQuote2, l.triggerLow, "bearish", tf)
-      })
-    })
-    relevantLaggards.sort(function(a, b) { return a.distToTriggerPct - b.distToTriggerPct })
-  }
-
   return {
     symbol: basketSymbol,
     name: basketName,
@@ -3591,53 +3237,368 @@ function computeBasketAttackMetrics(basketSymbol, basketName, category, holdings
     pctAttack2u: pctAttack2u,
     pctAttack2d: pctAttack2d,
     netAttackDelta: netAttackDelta,
-    status: status,
-    attackConstituents: attackConstituents,
-    laggards: relevantLaggards
+    status: status
   }
 }
 
-function computeAllAttackBaskets(basketsHoldingsMap, dailyCandlesMap, liveQuotesMap) {
-  var baskets = allAttackBasketsList()
-  var out = []
-  for (var i = 0; i < baskets.length; i++) {
-    var b = baskets[i]
-    var sym = b.symbol
-    var holdingsData = basketsHoldingsMap ? basketsHoldingsMap[sym] : null
-    var holdings = (holdingsData && holdingsData.holdings) ? holdingsData.holdings : (Array.isArray(holdingsData) ? holdingsData : [])
-    var metrics = computeBasketAttackMetrics(sym, b.name, b.category, holdings, dailyCandlesMap, liveQuotesMap)
-    out.push(metrics)
+function focusBasketPairs() {
+  return {
+    "GOOGL": { symbol: "GOOGL", basket: "XLC", peer: "META" },
+    "NVDA": { symbol: "NVDA", basket: "SMH", peer: "TSM" }
   }
-  return out
 }
 
-function sortAttackBaskets(basketsList, sortKey, sortAsc) {
-  if (!Array.isArray(basketsList)) return []
-  var list = basketsList.slice()
-  var asc = !!sortAsc
-  var sk = String(sortKey || "attack").toLowerCase()
+function focusPairForSymbol(symbol) {
+  if (!symbol) return null
+  var sym = normalizeSymbol(symbol)
+  var pairs = focusBasketPairs()
+  return pairs[sym] || null
+}
 
-  list.sort(function (a, b) {
-    if (sk === "symbol" || sk === "ticker") {
-      return asc ? a.symbol.localeCompare(b.symbol) : b.symbol.localeCompare(a.symbol)
+function sliceCandlesBefore(raw, cutoff) {
+  if (!Array.isArray(raw) || raw.length === 0) return []
+  var cut = Number(cutoff)
+  if (!isFinite(cut) || cut <= 0) return raw
+  var low = 0
+  var high = raw.length
+  while (low < high) {
+    var mid = (low + high) >>> 1
+    if (raw[mid] && isFinite(raw[mid].timestamp) && raw[mid].timestamp < cut) {
+      low = mid + 1
+    } else {
+      high = mid
     }
-    if (sk === "name") {
-      return asc ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name)
-    }
-    if (sk === "pct2u") {
-      return asc ? (a.pct2u - b.pct2u) : (b.pct2u - a.pct2u)
-    }
-    if (sk === "pct2d") {
-      return asc ? (a.pct2d - b.pct2d) : (b.pct2d - a.pct2d)
-    }
-    var diff = Number(a.netAttackDelta) - Number(b.netAttackDelta)
-    if (Math.abs(diff) > 0.0001) {
-      return asc ? diff : -diff
-    }
-    return Math.abs(b.pctAttack2u + b.pctAttack2d) - Math.abs(a.pctAttack2u + a.pctAttack2d)
-  })
+  }
+  return raw.slice(0, low)
+}
 
-  return list
+function computeReplayFocusPair(pair, focusCandles, focusHoldings, cutoffTs) {
+  if (!pair || !pair.basket || !focusCandles) return null
+  var cut = Number(cutoffTs)
+  if (!isFinite(cut) || cut <= 0) return null
+
+  var focusTfs = ["30", "60", "1D", "1W", "1M"]
+  var holdings = (focusHoldings && focusHoldings[pair.basket]) ? focusHoldings[pair.basket] : []
+  var tfDetails = {}
+
+  for (var i = 0; i < focusTfs.length; i++) {
+    var tfKey = focusTfs[i]
+    var cMap = focusCandles[tfKey] || {}
+    var slicedMap = {}
+
+    for (var hi = 0; hi < holdings.length; hi++) {
+      var h = holdings[hi]
+      if (!h || !h.symbol || h.delisted) continue
+      var sym = normalizeSymbol(h.symbol)
+      var raw = cMap[sym]
+      if (Array.isArray(raw) && raw.length > 0) {
+        slicedMap[sym] = sliceCandlesBefore(raw, cut)
+      }
+    }
+
+    var bMetrics = computeBasketAttackMetrics(pair.basket, pair.basket, "Sector", holdings, slicedMap, null, tfKey)
+
+    var peerRaw = cMap[pair.peer]
+    var peerCandles = slicedMap[pair.peer] || (Array.isArray(peerRaw) ? sliceCandlesBefore(peerRaw, cut) : [])
+    var peerInfo = { symbol: pair.peer, scenario: "-", color: "-", price: null, inForce: "-" }
+    if (peerCandles && peerCandles.length >= 2) {
+      var pLast = peerCandles[peerCandles.length - 1]
+      var pPrev = peerCandles[peerCandles.length - 2]
+      var sc = stratScenario(pLast, pPrev)
+      var col = (Number(pLast.close) >= Number(pLast.open)) ? "G" : "R"
+      var inf = "-"
+      if (sc === "2u") inf = Number(pLast.close) >= Number(pPrev.high) ? "In-Force" : "Triggered"
+      else if (sc === "2d") inf = Number(pLast.close) <= Number(pPrev.low) ? "In-Force" : "Triggered"
+      else if (sc === "1") inf = "Inside Bar"
+      peerInfo = {
+        symbol: pair.peer,
+        scenario: sc,
+        color: col,
+        price: Number(pLast.close),
+        inForce: inf
+      }
+    }
+
+    tfDetails[tfKey] = {
+      basket: pair.basket,
+      timeframe: tfKey,
+      status: bMetrics.status,
+      pct2u: bMetrics.pct2u,
+      pct2d: bMetrics.pct2d,
+      pctAttack2u: bMetrics.pctAttack2u,
+      pctAttack2d: bMetrics.pctAttack2d,
+      count2u: bMetrics.count2u,
+      count2d: bMetrics.count2d,
+      totalHoldings: bMetrics.totalHoldings,
+      peer: peerInfo
+    }
+  }
+
+  return {
+    symbol: pair.symbol,
+    basket: pair.basket,
+    peer: pair.peer,
+    timeframes: tfDetails
+  }
+}
+
+function computeFocusBasketSupport(symbol, timeframe, candles, quote, dailyCandles, weeklyCandles, attackScanResult, replayCutoffTs) {
+  var emptyResult = {
+    hasSupport: false,
+    visible: false,
+    symbol: symbol || "",
+    timeframe: timeframe || "1D",
+    basket: "",
+    peer: "",
+    attackToken: "-",
+    attackColor: "dim",
+    peerToken: "-",
+    peerColor: "dim",
+    supportToken: "-",
+    supportColor: "dim",
+    supportPct: 0,
+    sizingTier: "pass",
+    positionSizing: "STAND DOWN (0x)",
+    sizingColor: "red",
+    sizingReason: "No basket support data available.",
+    attackTooltip: "",
+    peerTooltip: "",
+    supportTooltip: "",
+    allTimeframes: []
+  }
+
+  var pair = focusPairForSymbol(symbol)
+  if (!pair) return emptyResult
+
+  var tf = String(timeframe || "1D").toUpperCase()
+  if (tf === "30M") tf = "30"
+  if (tf === "60M") tf = "60"
+  if (tf === "D") tf = "1D"
+  if (tf === "W") tf = "1W"
+  if (tf === "M") tf = "1M"
+
+  // 1. Resolve Focus Pair data from attackScanResult (dynamic if replay mode active)
+  var isReplay = isFinite(replayCutoffTs) && Number(replayCutoffTs) > 0
+  var focusData = null
+  if (isReplay && attackScanResult && attackScanResult.focusCandles) {
+    focusData = computeReplayFocusPair(pair, attackScanResult.focusCandles, attackScanResult.focusHoldings, Number(replayCutoffTs))
+  }
+  if (!focusData && attackScanResult && attackScanResult.focusPairs) {
+    focusData = attackScanResult.focusPairs[pair.symbol || normalizeSymbol(symbol)]
+  }
+  var tfData = focusData && focusData.timeframes ? focusData.timeframes[tf] : null
+
+  // Fallback to searching attackScanResult.timeframes or daily/weekly
+  if (!tfData && attackScanResult) {
+    var rawTf = (attackScanResult.timeframes && attackScanResult.timeframes[tf]) ? attackScanResult.timeframes[tf] : null
+    if (!rawTf && tf === "1D" && attackScanResult.daily) rawTf = attackScanResult.daily
+    if (!rawTf && tf === "1W" && attackScanResult.weekly) rawTf = attackScanResult.weekly
+    if (rawTf && rawTf.baskets) {
+      var foundBasket = null
+      for (var bi = 0; bi < rawTf.baskets.length; bi++) {
+        if (rawTf.baskets[bi].symbol === pair.basket) {
+          foundBasket = rawTf.baskets[bi]
+          break
+        }
+      }
+      if (foundBasket) {
+        tfData = {
+          basket: pair.basket,
+          timeframe: tf,
+          status: foundBasket.status,
+          pct2u: foundBasket.pct2u,
+          pct2d: foundBasket.pct2d,
+          pctAttack2u: foundBasket.pctAttack2u,
+          pctAttack2d: foundBasket.pctAttack2d,
+          peer: { symbol: pair.peer, scenario: "-", color: "-", price: null, inForce: "-" }
+        }
+      }
+    }
+  }
+
+  if (!tfData) {
+    return Object.assign({}, emptyResult, {
+      hasSupport: true,
+      visible: true,
+      symbol: normalizeSymbol(symbol),
+      timeframe: tf,
+      basket: pair.basket,
+      peer: pair.peer,
+      attackToken: "CHOP",
+      attackColor: "dim",
+      peerToken: pair.peer + " -",
+      peerColor: "dim",
+      supportToken: "SUP 0%",
+      supportColor: "dim",
+      attackTooltip: pair.basket + " " + tf + " (Awaiting scan data...)",
+      peerTooltip: pair.peer + " (Awaiting quote...)",
+      supportTooltip: "Basket support data loading...",
+      sizingReason: "Awaiting sector attack scan update."
+    })
+  }
+
+  // 2. Determine Focus Ticker Active Candle Scenario & Color
+  var curCandle = (Array.isArray(candles) && candles.length > 0) ? candles[candles.length - 1] : null
+  var prevCandle = (Array.isArray(candles) && candles.length > 1) ? candles[candles.length - 2] : null
+  var livePx = stratLivePrice(quote)
+  var cLast = curCandle ? Object.assign({}, curCandle) : null
+  if (cLast && livePx !== null && isFinite(livePx)) {
+    cLast.close = livePx
+    if (cLast.high === null || livePx > cLast.high) cLast.high = livePx
+    if (cLast.low === null || livePx < cLast.low) cLast.low = livePx
+  }
+  var sc = (cLast && prevCandle) ? stratScenario(cLast, prevCandle) : "-"
+
+  // 3. Option 3C Trade Direction Determination:
+  var direction = "bullish"
+  if (sc === "2u") {
+    direction = "bullish"
+  } else if (sc === "2d") {
+    direction = "bearish"
+  } else {
+    // Option 3C: Inside bar ('1') or '-' -> Inherit Macro FTFC Direction (Daily close vs open)
+    var dLast = (Array.isArray(dailyCandles) && dailyCandles.length > 0) ? dailyCandles[dailyCandles.length - 1] : null
+    if (dLast && isFinite(dLast.close) && isFinite(dLast.open)) {
+      direction = (Number(dLast.close) >= Number(dLast.open)) ? "bullish" : "bearish"
+    } else {
+      var wLast = (Array.isArray(weeklyCandles) && weeklyCandles.length > 0) ? weeklyCandles[weeklyCandles.length - 1] : null
+      if (wLast && isFinite(wLast.close) && isFinite(wLast.open)) {
+        direction = (Number(wLast.close) >= Number(wLast.open)) ? "bullish" : "bearish"
+      } else {
+        direction = (Number(tfData.pct2u) >= Number(tfData.pct2d)) ? "bullish" : "bearish"
+      }
+    }
+  }
+
+  var isLong = direction === "bullish"
+  var supportPct = isLong ? Number(tfData.pct2u || 0) : Number(tfData.pct2d || 0)
+  var opposePct = isLong ? Number(tfData.pct2d || 0) : Number(tfData.pct2u || 0)
+  var attackPct = isLong ? Number(tfData.pctAttack2u || 0) : Number(tfData.pctAttack2d || 0)
+  var opposeAttackPct = isLong ? Number(tfData.pctAttack2d || 0) : Number(tfData.pctAttack2u || 0)
+
+  // 4. Attack Token & Color
+  var basketStatus = String(tfData.status || "NEUTRAL").toUpperCase()
+  var attackToken = "CHOP"
+  var attackColor = "dim"
+  if (basketStatus === (isLong ? "BULLISH ATTACK" : "BEARISH ATTACK") || (supportPct >= 65 && attackPct >= 15)) {
+    attackToken = "ATK"
+    attackColor = isLong ? "green" : "red"
+  } else if (basketStatus === (isLong ? "BEARISH ATTACK" : "BULLISH ATTACK") || (opposePct >= 65 && opposeAttackPct >= 15)) {
+    attackToken = "OPP"
+    attackColor = isLong ? "red" : "green"
+  } else if (supportPct >= 55) {
+    attackToken = "DEV"
+    attackColor = "amber"
+  } else if (opposePct >= 55) {
+    attackToken = "OPP"
+    attackColor = isLong ? "red" : "green"
+  } else {
+    attackToken = "CHOP"
+    attackColor = "dim"
+  }
+
+  // 5. Peer Token & Color
+  var peerInfo = tfData.peer || {}
+  var peerSc = String(peerInfo.scenario || "-").toUpperCase()
+  var peerToken = pair.peer + " " + peerSc
+  var peerColor = "dim"
+  var peerAligned = false
+  if (peerSc === "2U" || (peerSc === "-" && peerInfo.color === "G")) {
+    peerColor = "green"
+    if (isLong) peerAligned = true
+  } else if (peerSc === "2D" || (peerSc === "-" && peerInfo.color === "R")) {
+    peerColor = "red"
+    if (!isLong) peerAligned = true
+  } else if (peerSc === "1") {
+    peerColor = "dim"
+  }
+
+  // 6. Support Token & Color
+  var supportToken = (attackToken === "OPP" ? "OPP " : "SUP ") + Math.round(supportPct) + "%"
+  var supportColor = "dim"
+  if (attackToken === "OPP" || supportPct < 45) {
+    supportColor = "red"
+  } else if (supportPct >= 65) {
+    supportColor = isLong ? "green" : "red"
+  } else if (supportPct >= 50) {
+    supportColor = "amber"
+  }
+
+  // 7. 3-Tier Position Sizing
+  var sizingTier = "half"
+  var positionSizing = "HALF (0.5x)"
+  var sizingColor = "amber"
+  var sizingReason = ""
+
+  if ((attackToken === "ATK" || supportPct >= 65) && peerAligned) {
+    sizingTier = "full"
+    positionSizing = "FULL (1.0x)"
+    sizingColor = "green"
+    sizingReason = "Strong basket support. " + pair.peer + " and " + Math.round(supportPct) + "% of " + pair.basket + " are breaking in direction."
+  } else if (attackToken === "OPP" || (opposePct > supportPct && opposePct >= 60) || (!peerAligned && peerSc !== "1" && peerSc !== "-")) {
+    sizingTier = "pass"
+    positionSizing = "STAND DOWN (0x)"
+    sizingColor = "red"
+    sizingReason = "Opposing sector pressure. " + pair.basket + " (" + Math.round(opposePct) + "% opposing) or " + pair.peer + " is moving against the trade."
+  } else {
+    sizingTier = "half"
+    positionSizing = "HALF (0.5x)"
+    sizingColor = "amber"
+    sizingReason = "Moderate basket support. " + pair.basket + " is developing (" + Math.round(supportPct) + "%) or " + pair.peer + " is consolidating inside."
+  }
+
+  // 8. Tooltips
+  var attackDesc = attackToken === "ATK" ? (isLong ? "Bullish Attack" : "Bearish Attack") : (attackToken === "DEV" ? "Developing " + (isLong ? "Buy" : "Sell") : (attackToken === "OPP" ? "Opposing Sector Pressure" : "Inside Chop"))
+  var attackTooltip = pair.basket + " " + tf + " " + attackDesc + " (" + Math.round(supportPct) + "% " + (isLong ? "2U" : "2D") + ", " + Math.round(attackPct) + "% Attack)"
+  var peerPxStr = (peerInfo.price && isFinite(peerInfo.price)) ? (" ($" + Number(peerInfo.price).toFixed(2) + ")") : ""
+  var peerTooltip = pair.peer + " " + peerSc + " on " + tf + peerPxStr + (peerInfo.inForce && peerInfo.inForce !== "-" ? (" · " + peerInfo.inForce) : "")
+  var supportTooltip = "Basket Support: " + Math.round(supportPct) + "% of " + pair.basket + " holdings are currently breaking " + (isLong ? "2U" : "2D") + " on " + tf
+
+  // 9. All 5 Timeframes for Flyout
+  var allTimeframes = []
+  var checkTfs = ["30", "60", "1D", "1W", "1M"]
+  for (var ti = 0; ti < checkTfs.length; ti++) {
+    var cTf = checkTfs[ti]
+    var cTfData = focusData && focusData.timeframes ? focusData.timeframes[cTf] : null
+    var cPct = cTfData ? (isLong ? cTfData.pct2u : cTfData.pct2d) : null
+    var cAtk = cTfData ? cTfData.status : "-"
+    var cPeerSc = cTfData && cTfData.peer ? cTfData.peer.scenario : "-"
+    var cPeerCol = cTfData && cTfData.peer ? cTfData.peer.color : "-"
+    allTimeframes.push({
+      timeframe: cTf,
+      status: cAtk,
+      supportPct: cPct !== null ? Math.round(cPct) : null,
+      peerScenario: cPeerSc,
+      peerColor: cPeerCol
+    })
+  }
+
+  return {
+    hasSupport: true,
+    visible: true,
+    symbol: normalizeSymbol(symbol),
+    timeframe: tf,
+    basket: pair.basket,
+    peer: pair.peer,
+    direction: direction,
+    attackToken: attackToken,
+    attackColor: attackColor,
+    peerToken: peerToken,
+    peerColor: peerColor,
+    peerPrice: peerInfo.price || null,
+    peerInForce: peerInfo.inForce || "-",
+    supportToken: supportToken,
+    supportColor: supportColor,
+    supportPct: supportPct,
+    sizingTier: sizingTier,
+    positionSizing: positionSizing,
+    sizingColor: sizingColor,
+    sizingReason: sizingReason,
+    attackTooltip: attackTooltip,
+    peerTooltip: peerTooltip,
+    supportTooltip: supportTooltip,
+    allTimeframes: allTimeframes
+  }
 }
 
 function stratRuleRationales() {
@@ -5323,6 +5284,236 @@ function nodeCommand(scriptPath, extraArgs) {
   return cmd;
 }
 
+function candleDateIso(candle) {
+  if (!candle) return "";
+  if (candle.date) return String(candle.date);
+  var ts = candle.timestamp || candle.time;
+  if (!ts) return "";
+  var d = new Date(ts > 1e11 ? ts : ts * 1000);
+  var y = d.getUTCFullYear();
+  var m = d.getUTCMonth() + 1;
+  var day = d.getUTCDate();
+  return y + "-" + (m < 10 ? "0" : "") + m + "-" + (day < 10 ? "0" : "") + day;
+}
+
+function computeRayForOrigin(candles, startIdx, endIdx, isUpper) {
+  var n = endIdx;
+  var cand = [];
+
+  for (var a2 = startIdx + 4; a2 < n; a2++) {
+    var isPeak = isUpper ?
+      ((candles[a2].high >= candles[a2 - 1].high) && (a2 === n - 1 || candles[a2].high >= candles[a2 + 1].high)) :
+      ((candles[a2].low <= candles[a2 - 1].low) && (a2 === n - 1 || candles[a2].low <= candles[a2 + 1].low));
+
+    if (!isPeak) continue;
+
+    var p2 = isUpper ? candles[a2].high : candles[a2].low;
+    var bestA1 = -1;
+    var bestSlope = isUpper ? Infinity : -Infinity;
+
+    for (var j = startIdx; j <= a2 - 4; j++) {
+      var p1 = isUpper ? candles[j].high : candles[j].low;
+      var m = (p2 - p1) / (a2 - j);
+      if (isUpper && m < -0.0001) continue;
+      if (!isUpper && m > 0.0001) continue;
+
+      var valid = true;
+      for (var mid = j + 1; mid < a2; mid++) {
+        var midP = isUpper ? candles[mid].high : candles[mid].low;
+        var lineY = p1 + m * (mid - j);
+        if (isUpper && midP > lineY + 0.001) { valid = false; break; }
+        if (!isUpper && midP < lineY - 0.001) { valid = false; break; }
+      }
+      if (valid) {
+        if (isUpper && m < bestSlope) {
+          bestSlope = m;
+          bestA1 = j;
+        } else if (!isUpper && m > bestSlope) {
+          bestSlope = m;
+          bestA1 = j;
+        }
+      }
+    }
+
+    if (bestA1 !== -1) {
+      var breach = 0;
+      for (var post = a2 + 1; post < n; post++) {
+        var postP = isUpper ? candles[post].high : candles[post].low;
+        var lineY = (isUpper ? candles[bestA1].high : candles[bestA1].low) + bestSlope * (post - bestA1);
+        if (isUpper && postP > lineY + 0.005 * postP) breach++;
+        if (!isUpper && postP < lineY - 0.005 * postP) breach++;
+      }
+      if (breach === 0) {
+        cand.push({
+          anchor1: { index: bestA1, price: isUpper ? candles[bestA1].high : candles[bestA1].low, date: candleDateIso(candles[bestA1]), time: candles[bestA1].time || candles[bestA1].timestamp },
+          anchor2: { index: a2, price: p2, date: candleDateIso(candles[a2]), time: candles[a2].time || candles[a2].timestamp },
+          slope: bestSlope,
+          span: a2 - bestA1
+        });
+      }
+    }
+  }
+
+  if (cand.length === 0) return null;
+  cand.sort(function(a, b) {
+    if (isUpper) {
+      if (b.anchor2.price !== a.anchor2.price) return b.anchor2.price - a.anchor2.price;
+    } else {
+      if (a.anchor2.price !== b.anchor2.price) return a.anchor2.price - b.anchor2.price;
+    }
+    return b.anchor2.index - a.anchor2.index;
+  });
+  return cand[0];
+}
+
+function isRayRedundant(r1, r2) {
+  if (!r1 || !r2) return false;
+  if (r1.anchor1.index === r2.anchor1.index && r1.anchor2.index === r2.anchor2.index) return true;
+  if (Math.abs(r1.anchor2.index - r2.anchor2.index) <= 2 && Math.abs(r1.anchor1.index - r2.anchor1.index) <= 3) return true;
+  return false;
+}
+
+function computeActiveBroadening(candles, lookbackBars) {
+  if (!candles || candles.length < 5) return null;
+  var n = candles.length;
+
+  var startIdx = (typeof lookbackBars === "number" && lookbackBars >= 5) ?
+    Math.max(0, n - lookbackBars) :
+    Math.max(0, n - 260);
+
+  // If a specific lookback is provided (e.g. from bar replay), evaluate from startIdx:
+  if (typeof lookbackBars === "number" && lookbackBars >= 5) {
+    var up = computeRayForOrigin(candles, startIdx, n, true);
+    var lo = computeRayForOrigin(candles, startIdx, n, false);
+    var lastIdx = n - 1;
+    var projUp = up ? (up.anchor1.price + up.slope * (lastIdx - up.anchor1.index)) : null;
+    var projLo = lo ? (lo.anchor1.price + lo.slope * (lastIdx - lo.anchor1.index)) : null;
+
+    var minorOrigins = [];
+    for (var mi = startIdx + Math.max(5, Math.floor(lookbackBars * 0.4)); mi < n; mi++) {
+      if (stratScenario(candles[mi], candles[mi - 1]) === "3") {
+        minorOrigins.push(mi - 1);
+      }
+    }
+    var minorUp = null;
+    var minorLo = null;
+    for (var mk = minorOrigins.length - 1; mk >= 0; mk--) {
+      var origM = minorOrigins[mk];
+      var mU = computeRayForOrigin(candles, origM, n, true);
+      var mL = computeRayForOrigin(candles, origM, n, false);
+      if (mU && !isRayRedundant(up, mU) && !minorUp) minorUp = mU;
+      if (mL && !isRayRedundant(lo, mL) && !minorLo) minorLo = mL;
+      if (minorUp || minorLo) break;
+    }
+
+    var majorExplicit = (up || lo) ? {
+      originIndex: startIdx,
+      upper: up,
+      lower: lo,
+      projectedUpper: projUp,
+      projectedLower: projLo
+    } : null;
+
+    var minorExplicit = (minorUp || minorLo) ? {
+      originIndex: Math.min(minorUp ? minorUp.anchor1.index : n, minorLo ? minorLo.anchor1.index : n),
+      upper: minorUp,
+      lower: minorLo,
+      projectedUpper: minorUp ? (minorUp.anchor1.price + minorUp.slope * (lastIdx - minorUp.anchor1.index)) : null,
+      projectedLower: minorLo ? (minorLo.anchor1.price + minorLo.slope * (lastIdx - minorLo.anchor1.index)) : null
+    } : null;
+
+    return {
+      originIndex: startIdx,
+      major: majorExplicit,
+      minor: minorExplicit,
+      upper: up,
+      lower: lo,
+      projectedUpper: projUp,
+      projectedLower: projLo
+    };
+  }
+
+  // Event-driven mode (no lookbackBars passed):
+  // Scan all Scenario 3 bars in the cycle window (up to 260 trading days)
+  var origins = [];
+  for (var i = startIdx + 1; i < n; i++) {
+    if (stratScenario(candles[i], candles[i - 1]) === "3") {
+      origins.push(i - 1);
+    }
+  }
+  if (origins.indexOf(startIdx) === -1) {
+    origins.unshift(startIdx);
+  }
+
+  var candU = [];
+  var candL = [];
+  for (var k = 0; k < origins.length; k++) {
+    var orig = origins[k];
+    var u = computeRayForOrigin(candles, orig, n, true);
+    var l = computeRayForOrigin(candles, orig, n, false);
+    if (u) {
+      var existsU = false;
+      for (var ui = 0; ui < candU.length; ui++) {
+        if (isRayRedundant(candU[ui], u)) { existsU = true; break; }
+      }
+      if (!existsU) candU.push(u);
+    }
+    if (l) {
+      var existsL = false;
+      for (var li = 0; li < candL.length; li++) {
+        if (isRayRedundant(candL[li], l)) { existsL = true; break; }
+      }
+      if (!existsL) candL.push(l);
+    }
+  }
+
+  candU.sort(function(a, b) { return b.span - a.span; });
+  candL.sort(function(a, b) { return b.span - a.span; });
+
+  var majorU = candU.length > 0 ? candU[0] : null;
+  var majorL = candL.length > 0 ? candL[0] : null;
+
+  var minorU = null;
+  for (var mui = 1; mui < candU.length; mui++) {
+    if (!isRayRedundant(candU[mui], majorU)) { minorU = candU[mui]; break; }
+  }
+
+  var minorL = null;
+  for (var mli = 1; mli < candL.length; mli++) {
+    if (!isRayRedundant(candL[mli], majorL)) { minorL = candL[mli]; break; }
+  }
+
+  var lastIdxFull = n - 1;
+  var projU = majorU ? (majorU.anchor1.price + majorU.slope * (lastIdxFull - majorU.anchor1.index)) : null;
+  var projL = majorL ? (majorL.anchor1.price + majorL.slope * (lastIdxFull - majorL.anchor1.index)) : null;
+
+  var majorAuto = (majorU || majorL) ? {
+    originIndex: Math.min(majorU ? majorU.anchor1.index : n, majorL ? majorL.anchor1.index : n),
+    upper: majorU,
+    lower: majorL,
+    projectedUpper: projU,
+    projectedLower: projL
+  } : null;
+
+  var minorAuto = (minorU || minorL) ? {
+    originIndex: Math.min(minorU ? minorU.anchor1.index : n, minorL ? minorL.anchor1.index : n),
+    upper: minorU,
+    lower: minorL,
+    projectedUpper: minorU ? (minorU.anchor1.price + minorU.slope * (lastIdxFull - minorU.anchor1.index)) : null,
+    projectedLower: minorL ? (minorL.anchor1.price + minorL.slope * (lastIdxFull - minorL.anchor1.index)) : null
+  } : null;
+
+  return {
+    originIndex: majorAuto ? majorAuto.originIndex : (minorAuto ? minorAuto.originIndex : startIdx),
+    major: majorAuto,
+    minor: minorAuto,
+    upper: majorU,
+    lower: majorL,
+    projectedUpper: projU,
+    projectedLower: projL
+  };
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     defaultWatchlist: defaultWatchlist,
@@ -5411,20 +5602,9 @@ if (typeof module !== "undefined") {
     resolveCusipToTicker: resolveCusipToTicker,
     parseNportXml: parseNportXml,
     sortHoldings: sortHoldings,
-    allSpdrSectorsList: allSpdrSectorsList,
-    sparkCandlesUrl: sparkCandlesUrl,
-    parseSparkCandles: parseSparkCandles,
     prepareConstituentCandles: prepareConstituentCandles,
-    computeSectorBreadthMetrics: computeSectorBreadthMetrics,
-    computeAllSectorsBreadth: computeAllSectorsBreadth,
-    sortSectorBreadth: sortSectorBreadth,
-    formatNetDelta: formatNetDelta,
     detectStratAttack: detectStratAttack,
-    allAttackBasketsList: allAttackBasketsList,
     computeBasketAttackMetrics: computeBasketAttackMetrics,
-    computeAllAttackBaskets: computeAllAttackBaskets,
-    sortAttackBaskets: sortAttackBaskets,
-    extractWtdDailyCandles: extractWtdDailyCandles,
     stratRuleRationales: stratRuleRationales,
     resolveDominoHtfSignal: resolveDominoHtfSignal,
     resolveUntaggedHtfTargets: resolveUntaggedHtfTargets,
@@ -5445,6 +5625,12 @@ if (typeof module !== "undefined") {
     stepReplayCutoff: stepReplayCutoff,
     formatReplayBadgeTime: formatReplayBadgeTime,
     mapReplayStepInterval: mapReplayStepInterval,
+    focusBasketPairs: focusBasketPairs,
+    focusPairForSymbol: focusPairForSymbol,
+    sliceCandlesBefore: sliceCandlesBefore,
+    computeReplayFocusPair: computeReplayFocusPair,
+    computeFocusBasketSupport: computeFocusBasketSupport,
+    computeActiveBroadening: computeActiveBroadening,
     nodeCommand: nodeCommand
   }
 }

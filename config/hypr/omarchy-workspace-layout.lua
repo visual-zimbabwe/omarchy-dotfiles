@@ -195,8 +195,8 @@ W.specs["thirds"] = { kind = "ratio", orientation = "columns", overflow = "exten
 W.specs["wide-centre"] = { kind = "ratio", orientation = "columns", overflow = "last", fill = "largest", underfill = "hold", grid_columns = 0, weights = { 20, 60, 20 } }
 W.specs["stacked"] = { kind = "ratio", orientation = "rows", overflow = "last", fill = "largest", underfill = "rescale", grid_columns = 0, weights = { 50, 50 } }
 W.specs["grid"] = { kind = "grid", orientation = "columns", overflow = "extend", fill = "largest", underfill = "rescale", grid_columns = 0, weights = { 25, 18.75, 18.75, 37.5 } }
-W.specs["two-rows-four-columns"] = { kind = "grid", orientation = "columns", overflow = "extend", fill = "largest", underfill = "rescale", grid_columns = 4, weights = { 25, 25, 25, 25 } }
-W.specs["custom"] = { kind = "ratio", orientation = "columns", overflow = "extend", fill = "largest", underfill = "rescale", grid_columns = 0, weights = { 33.33, 33.33, 16.67, 16.67 } }
+W.specs["two-rows-four-columns"] = { kind = "grid", orientation = "columns", overflow = "extend", fill = "largest", underfill = "rescale", grid_columns = 4, weights = { 12.5, 12.5, 25, 25, 25 } }
+W.specs["custom"] = { kind = "ratio", orientation = "columns", overflow = "extend", fill = "largest", underfill = "rescale", grid_columns = 0, weights = { 20, 20, 20, 20, 20 } }
 
 W.register("even")
 W.register("focus")

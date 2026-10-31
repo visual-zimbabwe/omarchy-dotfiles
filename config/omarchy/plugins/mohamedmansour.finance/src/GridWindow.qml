@@ -21,6 +21,7 @@ FloatingWindow {
     property bool syncTimeframe: false
     property bool syncCrosshair: true
     property bool syncTime: true
+    property bool showBroadening: false
     property string discordWebhook: ""
 
     property int activeCellIndex: 0
@@ -405,6 +406,63 @@ FloatingWindow {
         onTriggered: root.refreshAllCharts(true)
     }
 
+    property var attackScanResult: null
+    property bool attackScanLoading: false
+
+    function refreshAttackScan() {
+        var isFocus = Model.focusPairForSymbol(root.mainSymbol) !== null;
+        if (!isFocus || root.attackScanLoading)
+            return;
+        root.attackScanLoading = true;
+        var home = Quickshell.env("HOME");
+        var scriptPath = home + "/.config/omarchy/plugins/mohamedmansour.finance/scripts/fetch-attack.js";
+        attackScannerProc.command = Model.nodeCommand(scriptPath);
+        attackScannerProc.running = true;
+    }
+
+    FileView {
+        id: attackCacheFile
+        path: Quickshell.env("HOME") + "/.cache/omafinance/attack.json"
+        watchChanges: true
+        onLoaded: {
+            try {
+                var txt = text();
+                if (txt && txt.length > 0) {
+                    var parsed = JSON.parse(txt);
+                    if (parsed && (parsed.focusPairs || parsed.daily))
+                        root.attackScanResult = parsed;
+                }
+            } catch (e) {}
+        }
+    }
+
+    Process {
+        id: attackScannerProc
+        onExited: function (exitCode) {
+            root.attackScanLoading = false;
+            var raw = String(attackScannerStdout.text || "").trim();
+            if (exitCode === 0 && raw) {
+                try {
+                    var data = JSON.parse(raw);
+                    if (data && (data.focusPairs || data.daily))
+                        root.attackScanResult = data;
+                } catch (e) {}
+            }
+        }
+        stdout: StdioCollector {
+            id: attackScannerStdout
+            waitForEnd: true
+        }
+    }
+
+    Timer {
+        id: attackScanTimer
+        interval: 60000
+        running: root.visible && Model.focusPairForSymbol(root.mainSymbol) !== null
+        repeat: true
+        onTriggered: root.refreshAttackScan()
+    }
+
     function refreshAllCharts(force) {
         var isForced = force === true;
         var stepTf = Model.mapReplayStepInterval(root.replayStepInterval);
@@ -558,7 +616,8 @@ FloatingWindow {
             symbol: root.syncSymbol,
             timeframe: root.syncTimeframe,
             crosshair: root.syncCrosshair,
-            time: root.syncTime
+            time: root.syncTime,
+            broadening: root.showBroadening
         };
         root.stateSaveRequested(root.gridMode, sync, root.cellSymbols, splits);
     }
@@ -582,6 +641,7 @@ FloatingWindow {
     Component.onCompleted: {
         refreshQuotes();
         refreshAllCharts();
+        refreshAttackScan();
         Qt.callLater(function () {
             var item = root.getActiveCellItem();
             if (item)
@@ -593,6 +653,7 @@ FloatingWindow {
         if (visible) {
             refreshQuotes();
             refreshAllCharts();
+            refreshAttackScan();
             Qt.callLater(function () {
                 var item = root.getActiveCellItem();
                 if (item)
@@ -613,6 +674,7 @@ FloatingWindow {
         root.replayCutoffTs = 0;
         refreshQuotes();
         refreshAllCharts();
+        refreshAttackScan();
     }
     onGridModeChanged: {
         refreshQuotes();
@@ -1088,6 +1150,25 @@ FloatingWindow {
                             }
                         }
                     }
+
+                    Text {
+                        textFormat: Text.PlainText
+                        text: "BF " + (root.showBroadening ? "[ON]" : "[OFF]")
+                        color: root.showBroadening ? root.foreground : root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.bodySmall
+                        font.bold: root.showBroadening
+
+                        MouseArea {
+                            anchors.fill: parent
+                            anchors.margins: -Style.space(4)
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.showBroadening = !root.showBroadening;
+                                root.saveGridState();
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1125,7 +1206,9 @@ FloatingWindow {
                         dailyCandles: root.getCandles(symbol, "1D")
                         priceLevels: root.symbolLevels[symbol] || []
                         replayCutoffTs: root.replayCutoffTs
+                        attackScanResult: root.attackScanResult
                         activeFocusCell: true
+                        showBroadening: root.showBroadening
 
                         onFocusRequested: function (idx) {
                             root.activeCellIndex = idx;
@@ -1187,7 +1270,9 @@ FloatingWindow {
                             dailyCandles: root.getCandles(symbol, "1D")
                             priceLevels: root.symbolLevels[symbol] || []
                             replayCutoffTs: root.replayCutoffTs
+                            attackScanResult: root.attackScanResult
                             activeFocusCell: root.activeCellIndex === 0
+                            showBroadening: root.showBroadening
 
                             onFocusRequested: function (idx) {
                                 root.activeCellIndex = idx;
@@ -1250,7 +1335,9 @@ FloatingWindow {
                             dailyCandles: root.getCandles(symbol, "1D")
                             priceLevels: root.symbolLevels[symbol] || []
                             replayCutoffTs: root.replayCutoffTs
+                            attackScanResult: root.attackScanResult
                             activeFocusCell: root.activeCellIndex === 1
+                            showBroadening: root.showBroadening
 
                             onFocusRequested: function (idx) {
                                 root.activeCellIndex = idx;
@@ -1331,7 +1418,9 @@ FloatingWindow {
                                 dailyCandles: root.getCandles(symbol, "1D")
                                 priceLevels: root.symbolLevels[symbol] || []
                                 replayCutoffTs: root.replayCutoffTs
+                                attackScanResult: root.attackScanResult
                                 activeFocusCell: root.activeCellIndex === 2
+                                showBroadening: root.showBroadening
 
                                 onFocusRequested: function (idx) {
                                     root.activeCellIndex = idx;
@@ -1394,7 +1483,9 @@ FloatingWindow {
                                 dailyCandles: root.getCandles(symbol, "1D")
                                 priceLevels: root.symbolLevels[symbol] || []
                                 replayCutoffTs: root.replayCutoffTs
+                                attackScanResult: root.attackScanResult
                                 activeFocusCell: root.activeCellIndex === 3
+                                showBroadening: root.showBroadening
 
                                 onFocusRequested: function (idx) {
                                     root.activeCellIndex = idx;
@@ -1455,7 +1546,9 @@ FloatingWindow {
                                 dailyCandles: root.getCandles(symbol, "1D")
                                 priceLevels: root.symbolLevels[symbol] || []
                                 replayCutoffTs: root.replayCutoffTs
+                                attackScanResult: root.attackScanResult
                                 activeFocusCell: root.activeCellIndex === 2
+                                showBroadening: root.showBroadening
 
                                 onFocusRequested: function (idx) {
                                     root.activeCellIndex = idx;
@@ -1518,7 +1611,9 @@ FloatingWindow {
                                 dailyCandles: root.getCandles(symbol, "1D")
                                 priceLevels: root.symbolLevels[symbol] || []
                                 replayCutoffTs: root.replayCutoffTs
+                                attackScanResult: root.attackScanResult
                                 activeFocusCell: root.activeCellIndex === 3
+                                showBroadening: root.showBroadening
 
                                 onFocusRequested: function (idx) {
                                     root.activeCellIndex = idx;
@@ -1581,7 +1676,9 @@ FloatingWindow {
                                 dailyCandles: root.getCandles(symbol, "1D")
                                 priceLevels: root.symbolLevels[symbol] || []
                                 replayCutoffTs: root.replayCutoffTs
+                                attackScanResult: root.attackScanResult
                                 activeFocusCell: root.activeCellIndex === 4
+                                showBroadening: root.showBroadening
 
                                 onFocusRequested: function (idx) {
                                     root.activeCellIndex = idx;

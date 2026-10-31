@@ -13,7 +13,11 @@
     "WLD-USD",
     "XLC",
     "BTC-USD",
-    "SMH"
+    "SMH",
+    "NVDA",
+    "AMD",
+    "META",
+    "TLT"
   ],
   "pinned": [
     "GOOGL",
@@ -29,36 +33,27 @@
     "WLD-USD",
     "XLC",
     "BTC-USD",
-    "SMH"
+    "SMH",
+    "NVDA",
+    "AMD",
+    "META",
+    "TLT"
   ],
   "detailRange": "1M",
   "gridMode": "2+3",
   "gridSync": {
+    "broadening": true,
     "crosshair": false,
     "symbol": true,
     "time": false,
     "timeframe": false
   },
   "gridSymbols": [
-    "SMH",
-    "SMH",
-    "SMH",
-    "SMH",
-    "SMH"
-  ],
-  "gridTimeframes": [
-    "30",
-    "60",
-    "1D",
-    "1W",
-    "1M"
-  ],
-  "gridZooms": [
-    49,
-    69,
-    18,
-    8,
-    8
+    "IWM",
+    "IWM",
+    "IWM",
+    "IWM",
+    "IWM"
   ],
   "gridSplits": {
     "2x2": {
@@ -180,8 +175,8 @@
             "1M"
           ],
           "zooms": [
-            49,
-            69,
+            29,
+            77,
             18,
             8,
             8
@@ -203,7 +198,7 @@
             8,
             8,
             8,
-            21
+            8
           ],
           "gridMode": "2+3"
         },
@@ -220,7 +215,7 @@
           "zooms": [
             10,
             8,
-            8,
+            20,
             8,
             15
           ],
@@ -248,8 +243,19 @@
       ]
     }
   },
-  "breadthWeightMode": "equal",
-  "breadthSortTimeframe": "1W",
-  "breadthSortAsc": false,
+  "gridTimeframes": [
+    "30",
+    "60",
+    "1D",
+    "1W",
+    "1M"
+  ],
+  "gridZooms": [
+    29,
+    77,
+    74,
+    8,
+    8
+  ],
   "discordWebhook": "https://discord.com/api/webhooks/1555025989363310644/M0JepOpRsNNPbR_Ykk_-kgxc8plFo2Mfp7j0t_-Y7dv92osFqVITTKc5NcJ_qYA2v_TR"
 }
