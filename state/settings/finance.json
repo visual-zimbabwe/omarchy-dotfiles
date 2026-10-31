@@ -42,18 +42,18 @@
   "detailRange": "1M",
   "gridMode": "2+3",
   "gridSync": {
-    "broadening": true,
+    "broadening": false,
     "crosshair": false,
     "symbol": true,
     "time": false,
     "timeframe": false
   },
   "gridSymbols": [
-    "SPY",
-    "SPY",
-    "SPY",
-    "SPY",
-    "SPY"
+    "IWM",
+    "IWM",
+    "IWM",
+    "IWM",
+    "IWM"
   ],
   "gridSplits": {
     "2x2": {
@@ -253,7 +253,7 @@
   "gridZooms": [
     29,
     -1,
-    90,
+    121,
     42,
     8
   ],
