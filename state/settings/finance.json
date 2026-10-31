@@ -49,11 +49,11 @@
     "timeframe": false
   },
   "gridSymbols": [
-    "NVDA",
-    "NVDA",
-    "NVDA",
-    "NVDA",
-    "NVDA"
+    "IWM",
+    "IWM",
+    "IWM",
+    "IWM",
+    "IWM"
   ],
   "gridSplits": {
     "2x2": {
@@ -253,9 +253,9 @@
   "gridZooms": [
     29,
     77,
-    75,
-    8,
-    8
+    47,
+    27,
+    18
   ],
   "discordWebhook": "https://discord.com/api/webhooks/1555025989363310644/M0JepOpRsNNPbR_Ykk_-kgxc8plFo2Mfp7j0t_-Y7dv92osFqVITTKc5NcJ_qYA2v_TR"
 }
