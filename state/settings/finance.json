@@ -49,11 +49,11 @@
     "timeframe": false
   },
   "gridSymbols": [
-    "IWM",
-    "IWM",
-    "IWM",
-    "IWM",
-    "IWM"
+    "OIH",
+    "OIH",
+    "OIH",
+    "OIH",
+    "OIH"
   ],
   "gridSplits": {
     "2x2": {
@@ -253,7 +253,7 @@
   "gridZooms": [
     29,
     77,
-    177,
+    54,
     8,
     8
   ],
