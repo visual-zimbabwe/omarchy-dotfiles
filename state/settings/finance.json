@@ -157,15 +157,15 @@
           ],
           "zooms": [
             23,
+            28,
             8,
-            33,
             8,
             8
           ],
           "gridMode": "2+3"
         },
         {
-          "symbol": "SMH",
+          "symbol": "NVDA",
           "workspace": 2,
           "timeframes": [
             "30",
@@ -177,7 +177,7 @@
           "zooms": [
             29,
             77,
-            18,
+            9,
             8,
             8
           ],
@@ -196,7 +196,7 @@
           "zooms": [
             8,
             8,
-            8,
+            11,
             8,
             8
           ],
@@ -215,7 +215,7 @@
           "zooms": [
             10,
             8,
-            20,
+            8,
             8,
             15
           ],
@@ -251,10 +251,10 @@
     "1M"
   ],
   "gridZooms": [
-    126,
-    -1,
-    121,
-    42,
+    29,
+    16,
+    9,
+    8,
     8
   ],
   "discordWebhook": "https://discord.com/api/webhooks/1555025989363310644/M0JepOpRsNNPbR_Ykk_-kgxc8plFo2Mfp7j0t_-Y7dv92osFqVITTKc5NcJ_qYA2v_TR"
