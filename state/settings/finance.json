@@ -42,11 +42,10 @@
   "detailRange": "1M",
   "gridMode": "2+3",
   "gridSync": {
-    "broadening": false,
-    "crosshair": false,
     "symbol": true,
-    "time": false,
-    "timeframe": false
+    "timeframe": false,
+    "crosshair": false,
+    "time": false
   },
   "gridSymbols": [
     "SMH",
@@ -165,7 +164,7 @@
           "gridMode": "2+3"
         },
         {
-          "symbol": "NVDA",
+          "symbol": "SMH",
           "workspace": 2,
           "timeframes": [
             "30",
@@ -175,8 +174,8 @@
             "1M"
           ],
           "zooms": [
-            29,
-            77,
+            11,
+            13,
             9,
             8,
             8
@@ -203,7 +202,7 @@
           "gridMode": "2+3"
         },
         {
-          "symbol": "GOOGL",
+          "symbol": "XLK",
           "workspace": 2,
           "timeframes": [
             "30",
@@ -251,8 +250,8 @@
     "1M"
   ],
   "gridZooms": [
-    29,
-    24,
+    11,
+    13,
     9,
     8,
     8
