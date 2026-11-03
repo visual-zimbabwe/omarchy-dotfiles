@@ -28,18 +28,18 @@
   "detailRange": "1M",
   "gridMode": "2+3",
   "gridSync": {
-    "symbol": true,
-    "timeframe": false,
+    "broadening": false,
     "crosshair": false,
+    "symbol": true,
     "time": false,
-    "broadening": true
+    "timeframe": false
   },
   "gridSymbols": [
-    "PHM",
-    "PHM",
-    "PHM",
-    "PHM",
-    "PHM"
+    "SMH",
+    "SMH",
+    "SMH",
+    "SMH",
+    "SMH"
   ],
   "gridSplits": {
     "2x2": {
@@ -142,9 +142,9 @@
             "1M"
           ],
           "zooms": [
-            23,
-            28,
             8,
+            8,
+            161,
             8,
             8
           ],
@@ -239,7 +239,7 @@
   "gridZooms": [
     8,
     8,
-    221,
+    8,
     8,
     8
   ],
@@ -352,17 +352,53 @@
     "QQQ:60:1793727000:SHORT": "ARMED_SEEN",
     "NVDA:60:1793727000:LONG": "ARMED_NOTIFIED",
     "PHM:60:1793727000:LONG": "ARMED_SEEN",
-    "GOOGL:60:1793727000:SHORT": "ARMED_NOTIFIED",
+    "GOOGL:60:1793727000:SHORT": "TRIGGERED",
     "SPY:60:1793727000:SHORT": "ARMED_SEEN",
     "DIA:60:1793727000:SHORT": "ARMED_SEEN",
     "IWM:60:1793727000:SHORT": "ARMED_SEEN",
     "UVXY:60:1793727000:LONG": "ARMED_SEEN",
     "XLC:60:1793727000:LONG": "ARMED_SEEN",
-    "SMH:60:1793727000:SHORT": "ARMED_NOTIFIED",
+    "SMH:60:1793727000:SHORT": "TRIGGERED",
     "META:60:1793727000:LONG": "ARMED_SEEN",
-    "TSM:60:1793727000:SHORT": "ARMED_SEEN"
+    "TSM:60:1793727000:SHORT": "ARMED_SEEN",
+    "PHM:60:1793727000:SHORT": "ARMED_SEEN",
+    "PHM:60:1793727000:CONFLICT": "ARMED_SEEN",
+    "VIXY:60:1793727000:LONG": "ARMED_SEEN",
+    "VIXY:1D:1793629800:LONG": "ARMED_SEEN",
+    "TSLA:1D:1793629800:LONG": "ARMED_SEEN",
+    "TSLA:1D:1793629800:SHORT": "ARMED_SEEN"
   },
   "alertLog": [
+    {
+      "id": "GOOGL:60:1793727000:SHORT:TRIGGERED",
+      "timestamp": 1793731957820,
+      "timestampMs": 1793731957820,
+      "symbol": "GOOGL",
+      "kind": "STRAT",
+      "eventType": "TRIGGERED",
+      "direction": "SHORT",
+      "timeframe": "60",
+      "price": 279.78,
+      "triggerPrice": 279.7900085449219,
+      "title": "The Strat Alert: GOOGL [SHORT]",
+      "summary": "9/9 rules verified on 60 setup. · Trigger: $279.79 | Stop: $281.60 | T1 (Domino): 1W Low $276.92 -> Weekly 2-2 Bearish Continuation",
+      "body": "9/9 rules verified on 60 setup. · Trigger: $279.79 | Stop: $281.60 | T1 (Domino): 1W Low $276.92 -> Weekly 2-2 Bearish Continuation"
+    },
+    {
+      "id": "SMH:60:1793727000:SHORT:TRIGGERED",
+      "timestamp": 1793731716027,
+      "timestampMs": 1793731716027,
+      "symbol": "SMH",
+      "kind": "STRAT",
+      "eventType": "TRIGGERED",
+      "direction": "SHORT",
+      "timeframe": "60",
+      "price": 519.24,
+      "triggerPrice": 519.3499755859375,
+      "title": "The Strat Alert: SMH [SHORT]",
+      "summary": "9/9 rules verified on 60 setup. · Trigger: $519.35 | Stop: $521.92 | T1 (Domino): 1D Low $506.44 -> Daily 2-2 Bearish Continuation",
+      "body": "9/9 rules verified on 60 setup. · Trigger: $519.35 | Stop: $521.92 | T1 (Domino): 1D Low $506.44 -> Daily 2-2 Bearish Continuation"
+    },
     {
       "id": "GOOGL:60:1793727000:SHORT:ARMED",
       "timestamp": 1793730666204,
@@ -1082,36 +1118,6 @@
       "title": "The Strat Armed: DIS [LONG]",
       "summary": "Approaching 60 Trigger $113.07 (Cur: $112.98) | 7/9 rules ready.",
       "body": "Approaching 60 Trigger $113.07 (Cur: $112.98) | 7/9 rules ready."
-    },
-    {
-      "id": "XLC:60:1793716200:LONG:TRIGGERED",
-      "timestamp": 1793720178358,
-      "timestampMs": 1793720178358,
-      "symbol": "XLC",
-      "kind": "STRAT",
-      "eventType": "TRIGGERED",
-      "direction": "LONG",
-      "timeframe": "60",
-      "price": 100.94,
-      "triggerPrice": 100.8949966430664,
-      "title": "The Strat Alert: XLC [LONG]",
-      "summary": "9/9 rules verified on 60 setup. · Trigger: $100.89 | Stop: $100.18 | T1 (Domino): 1D High $101.50 -> Daily 2-2 Bullish Continuation",
-      "body": "9/9 rules verified on 60 setup. · Trigger: $100.89 | Stop: $100.18 | T1 (Domino): 1D High $101.50 -> Daily 2-2 Bullish Continuation"
-    },
-    {
-      "id": "GOOGL:60:1793716200:SHORT:ARMED",
-      "timestamp": 1793719934435,
-      "timestampMs": 1793719934435,
-      "symbol": "GOOGL",
-      "kind": "STRAT",
-      "eventType": "ARMED",
-      "direction": "SHORT",
-      "timeframe": "60",
-      "price": 277.765,
-      "triggerPrice": 277.55999755859375,
-      "title": "The Strat Armed: GOOGL [SHORT]",
-      "summary": "Approaching 60 Trigger $277.56 (Cur: $277.76) | 7/9 rules ready.",
-      "body": "Approaching 60 Trigger $277.56 (Cur: $277.76) | 7/9 rules ready."
     }
   ]
 }

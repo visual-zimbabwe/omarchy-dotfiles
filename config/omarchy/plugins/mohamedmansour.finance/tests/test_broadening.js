@@ -1,6 +1,15 @@
 const fs = require("fs");
 const path = require("path");
-const { computeActiveBroadening, candleWeekKey, bfWeekStarts } = require("../src/Model.js");
+const {
+  computeActiveBroadening,
+  candleWeekKey,
+  bfWeekStarts,
+  candleQuarterKey,
+  bfQuarterStarts,
+  candleYearKey,
+  bfYearStarts,
+  mergePeriodCandles
+} = require("../src/Model.js");
 
 console.log("==================================================");
 console.log("   TheStrat Broadening Formation Test Suite       ");
@@ -226,4 +235,30 @@ if (phmHullValid) {
   process.exit(1);
 }
 
-console.log("\n>>> ALL 11 TESTS PASSED SUCCESSFULLY! <<<\n");
+// 12. 1W Quarterly ('quarter') and 1M Yearly ('year') Broadening Formation Anchoring
+const spyWeeklyPath = path.join(__dirname, "spy_weekly.json");
+const spyWeeklyBars = JSON.parse(fs.readFileSync(spyWeeklyPath, "utf8"));
+const bfSpyWExplicit = computeActiveBroadening(spyWeeklyBars, null, "quarter");
+const bfSpyWAuto = computeActiveBroadening(spyWeeklyBars);
+
+const spyMonthlyBars = mergePeriodCandles(spyWeeklyBars, "1M");
+const bfSpyMExplicit = computeActiveBroadening(spyMonthlyBars, null, "year");
+const bfSpyMAuto = computeActiveBroadening(spyMonthlyBars);
+
+console.log("\n[Test 12] 1W Quarterly ('quarter') and 1M Yearly ('year') Anchoring Check");
+console.log("1W Formations (Explicit 'quarter'):", bfSpyWExplicit.formations?.length, "(Auto):", bfSpyWAuto.formations?.length);
+console.log("1M Formations (Explicit 'year'):", bfSpyMExplicit.formations?.length, "(Auto):", bfSpyMAuto.formations?.length);
+
+if (bfSpyWExplicit.formations && bfSpyWExplicit.formations.length > 0 &&
+    bfSpyWAuto.formations && bfSpyWAuto.formations.length === bfSpyWExplicit.formations.length &&
+    bfSpyMExplicit.formations && bfSpyMExplicit.formations.length > 0 &&
+    bfSpyMAuto.formations && bfSpyMAuto.formations.length === bfSpyMExplicit.formations.length &&
+    candleQuarterKey({ date: "2026-05-19" }) === "2026-Q2" &&
+    candleYearKey({ date: "2026-05-19" }) === "2026") {
+  console.log("PASS: 1W (quarterly anchored) and 1M (yearly anchored) broadening formations verified!");
+} else {
+  console.error("FAIL: 1W quarterly or 1M yearly broadening formation check failed!");
+  process.exit(1);
+}
+
+console.log("\n>>> ALL 12 TESTS PASSED SUCCESSFULLY! <<<\n");
