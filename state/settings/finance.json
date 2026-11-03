@@ -42,17 +42,18 @@
   "detailRange": "1M",
   "gridMode": "2+3",
   "gridSync": {
-    "symbol": true,
-    "timeframe": false,
+    "broadening": true,
     "crosshair": false,
-    "time": false
+    "symbol": true,
+    "time": false,
+    "timeframe": false
   },
   "gridSymbols": [
-    "SMH",
-    "SMH",
-    "SMH",
-    "SMH",
-    "SMH"
+    "UVXY",
+    "UVXY",
+    "UVXY",
+    "UVXY",
+    "UVXY"
   ],
   "gridSplits": {
     "2x2": {
@@ -98,7 +99,7 @@
             "1M"
           ],
           "zooms": [
-            8,
+            17,
             8,
             16,
             11,
@@ -164,6 +165,25 @@
           "gridMode": "2+3"
         },
         {
+          "symbol": "NVDA",
+          "workspace": 2,
+          "timeframes": [
+            "30",
+            "60",
+            "1D",
+            "1W",
+            "1M"
+          ],
+          "zooms": [
+            32,
+            25,
+            8,
+            17,
+            8
+          ],
+          "gridMode": "2+3"
+        },
+        {
           "symbol": "SMH",
           "workspace": 2,
           "timeframes": [
@@ -174,16 +194,16 @@
             "1M"
           ],
           "zooms": [
-            11,
-            13,
-            9,
+            8,
+            32,
+            8,
             8,
             8
           ],
           "gridMode": "2+3"
         },
         {
-          "symbol": "XLC",
+          "symbol": "GOOGL",
           "workspace": 2,
           "timeframes": [
             "30",
@@ -195,28 +215,9 @@
           "zooms": [
             8,
             8,
-            11,
             8,
+            25,
             8
-          ],
-          "gridMode": "2+3"
-        },
-        {
-          "symbol": "XLK",
-          "workspace": 2,
-          "timeframes": [
-            "30",
-            "60",
-            "1D",
-            "1W",
-            "1M"
-          ],
-          "zooms": [
-            10,
-            8,
-            8,
-            8,
-            15
           ],
           "gridMode": "2+3"
         },
@@ -232,8 +233,8 @@
           ],
           "zooms": [
             8,
-            8,
-            8,
+            110,
+            21,
             8,
             8
           ],
@@ -250,9 +251,9 @@
     "1M"
   ],
   "gridZooms": [
-    11,
-    13,
-    9,
+    8,
+    110,
+    21,
     8,
     8
   ],
