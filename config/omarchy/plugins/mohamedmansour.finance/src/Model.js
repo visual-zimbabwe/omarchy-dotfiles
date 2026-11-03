@@ -5967,13 +5967,13 @@ function bfAnchor(candles, idx, isUpper) {
 }
 
 // Boundary ray of a formation that starts at startIdx, drawn TheStrat-style: from the most
-// extreme swing high (or low) since the start, right to left, back to the earlier high (low)
-// that keeps every high (low) between them on or under (over) the line.
+// extreme swing high (or low) since the start, right to left, back to the earlier swing high
+// (low) that keeps every high (low) of the formation on or under (over) the line.
 //
 // Runs in "q-space" (q = +high for the upper ray, -low for the lower ray) so one upper-hull
-// routine serves both sides. For a fixed anchor2, anchor1 = j is valid iff every bar strictly
-// between j and anchor2 stays under the line, which reduces to
-//   slope(j) <= min over mid in (j, a2) of (q[a2] - q[mid] + eps) / (a2 - mid)
+// routine serves both sides. For a fixed anchor2, anchor1 = j is valid iff j is a swing point
+// and every bar in the formation [startIdx, a2) stays on or under the line, which reduces to
+//   slope(j) <= min over k in [startIdx, a2) of (q[a2] - q[k] + eps) / (a2 - k)
 // and is tracked as a running minimum while walking j right to left: O(n) per anchor2,
 // O(n^2) per call (was O(n^3)).
 function computeRayForOrigin(candles, startIdx, endIdx, isUpper, minSpan) {
@@ -6006,18 +6006,20 @@ function computeRayForOrigin(candles, startIdx, endIdx, isUpper, minSpan) {
     }
 
     // Flattest valid line; earliest anchor1 on ties. Broadening: anchor2 must be at least as
-    // extreme as anchor1 (within eps), i.e. the boundary never tilts back inward.
+    // extreme as anchor1 (within eps), i.e. the boundary never tilts back inward, and anchor1
+    // must be a swing point (at least as extreme as its right neighbour j + 1).
     var a1 = -1;
     var slopeQ = Infinity;
     for (var j = a2 - minSpan; j >= startIdx; j--) {
       var m = (p2 - q[j]) / (a2 - j);
-      if (p2 - q[j] >= -eps && m <= ceiling && m <= slopeQ) {
+      if (q[j] >= q[j + 1] - eps && p2 - q[j] >= -eps && m <= ceiling && m <= slopeQ) {
         slopeQ = m;
         a1 = j;
       }
       ceiling = Math.min(ceiling, (p2 - q[j] + eps) / (a2 - j));
     }
-    if (a1 === -1) continue;
+    // Every bar of the formation before anchor1 [startIdx, a1) must also stay on or under the line
+    if (a1 === -1 || slopeQ > ceiling) continue;
 
     // No later bar may have traded through the finished ray
     var breached = false;
