@@ -48,7 +48,12 @@
           "id": "yamz8.omanki"
         },
         {
-          "id": "alexzeitler.ytdlp"
+          "id": "alexzeitler.ytdlp",
+          "mode": "audio",
+          "quality": "best",
+          "audioFormat": "mp3",
+          "dest": "/home/juwimana/Downloads",
+          "checkoutDir": "/home/juwimana/src/github.com/yt-dlp"
         },
         {
           "id": "mohamedmansour.finance",
