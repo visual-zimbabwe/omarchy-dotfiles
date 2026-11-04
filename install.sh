@@ -259,6 +259,10 @@ if [[ ! -d "$HOME/surrey-rental-finder" ]]; then
     (cd "$HOME/surrey-rental-finder" && uv venv .venv && source .venv/bin/activate && uv pip install -r requirements.txt) 2>/dev/null || true
   fi
 fi
+if [[ -f "$HOME/.config/systemd/user/surrey-rentals.service" ]] && command -v systemctl &>/dev/null; then
+  systemctl --user daemon-reload 2>/dev/null || true
+  systemctl --user enable --now surrey-rentals.service 2>/dev/null || true
+fi
 
 # Fix permissions
 chmod 700 "$HOME/.config/cliamp" 2>/dev/null || true

@@ -99,6 +99,10 @@ copy_clean "$HOME_DIR/.config/omarchy" "$REPO_DIR/config/omarchy"
 mkdir -p "$REPO_DIR/config/Code/User"
 [[ -f "$HOME_DIR/.config/Code/User/settings.json" ]] && cp -f "$HOME_DIR/.config/Code/User/settings.json" "$REPO_DIR/config/Code/User/settings.json"
 
+# Systemd user services
+mkdir -p "$REPO_DIR/config/systemd/user"
+[[ -f "$HOME_DIR/.config/systemd/user/surrey-rentals.service" ]] && cp -f "$HOME_DIR/.config/systemd/user/surrey-rentals.service" "$REPO_DIR/config/systemd/user/surrey-rentals.service"
+
 # Git config (sanitize gh credential helper to be system-agnostic)
 if [[ -f "$HOME_DIR/.config/git/config" ]]; then
   mkdir -p "$REPO_DIR/config/git"

@@ -1,0 +1,15 @@
+[Unit]
+Description=Surrey Route 323 Rental Finder Background Watcher
+After=graphical-session.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/juwimana/surrey-rental-finder/run.sh watch --interval 15
+WorkingDirectory=/home/juwimana/surrey-rental-finder
+Restart=always
+RestartSec=30
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
