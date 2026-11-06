@@ -50,7 +50,7 @@ done
 # 3. Export Home Dotfiles
 echo -e "${GREEN}--> Exporting home dotfiles...${RESET}"
 mkdir -p "$REPO_DIR/home"
-for dot in .bashrc .zshrc .profile .bash_profile .XCompose; do
+for dot in .bashrc .zshrc .profile .bash_profile .XCompose .default-npm-packages; do
   if [[ -f "$HOME_DIR/$dot" ]]; then
     cp -f "$HOME_DIR/$dot" "$REPO_DIR/home/$dot"
   fi
