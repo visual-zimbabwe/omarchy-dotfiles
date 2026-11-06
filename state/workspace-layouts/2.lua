@@ -1,1 +1,1 @@
-hl.workspace_rule({ workspace = "2", layout = "dwindle" })
+o.workspace_mode({ workspace = "2", mode = "dwindle" })

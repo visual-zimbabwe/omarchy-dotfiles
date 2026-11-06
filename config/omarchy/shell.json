@@ -1,25 +1,12 @@
 {
   "bar": {
-    "centerAnchor": "omarchy.clock",
     "layout": {
       "center": [
-        {
-          "id": "omarchy.indicators"
-        },
         {
           "format": "dddd, MMMM d, yyyy HH:mm",
           "formatAlt": "d MMMM 'W'ww yyyy",
           "id": "omarchy.clock",
           "verticalFormat": "HH\n—\nmm"
-        },
-        {
-          "id": "omarchy.keyboard-layout"
-        },
-        {
-          "id": "omarchy.weather"
-        },
-        {
-          "id": "omarchy.system-update"
         }
       ],
       "left": [
@@ -40,6 +27,9 @@
           "pinned": [
             "NordVPN"
           ]
+        },
+        {
+          "id": "omarchy.keyboard-layout"
         },
         {
           "id": "juwimana.economist"
@@ -91,7 +81,79 @@
         {
           "id": "omarchy.power"
         }
-      ]
+      ],
+      "centerBegin": [
+        {
+          "id": "omarchy.indicators"
+        }
+      ],
+      "centerEnd": [
+        {
+          "id": "omarchy.elsewhen",
+          "cities": [
+            {
+              "name": "Vancouver",
+              "zone": "America/Vancouver"
+            },
+            {
+              "name": "Toronto",
+              "zone": "America/Toronto",
+              "lat": 43.70643,
+              "lon": -79.39864,
+              "region": "Ontario, CA"
+            },
+            {
+              "name": "Harare",
+              "zone": "Africa/Harare",
+              "lat": -17.82772,
+              "lon": 31.05337,
+              "region": "ZW"
+            },
+            {
+              "name": "New York",
+              "zone": "America/New_York",
+              "lat": 40.71427,
+              "lon": -74.00597,
+              "region": "US"
+            },
+            {
+              "name": "Washington D.C.",
+              "zone": "America/New_York",
+              "lat": 38.89511,
+              "lon": -77.03637,
+              "region": "District of Columbia, US"
+            },
+            {
+              "name": "Manchester",
+              "zone": "Europe/London",
+              "lat": 53.48095,
+              "lon": -2.23743,
+              "region": "England, GB"
+            },
+            {
+              "name": "Houston",
+              "zone": "America/Chicago",
+              "lat": 29.76328,
+              "lon": -95.36327,
+              "region": "Texas, US"
+            },
+            {
+              "name": "Chicago",
+              "zone": "America/Chicago",
+              "lat": 41.85003,
+              "lon": -87.65005,
+              "region": "Illinois, US"
+            }
+          ]
+        },
+        {
+          "id": "omarchy.weather"
+        },
+        {
+          "id": "omarchy.system-update"
+        }
+      ],
+      "tray": []
     },
     "position": "top",
     "transparent": true
