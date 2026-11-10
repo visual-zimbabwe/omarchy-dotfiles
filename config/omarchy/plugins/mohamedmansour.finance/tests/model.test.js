@@ -2353,6 +2353,14 @@ test("computeBasketAttackMetrics evaluates group attacks and breakout metrics", 
   assert.equal(metrics.pctAttack2u, 50)
   assert.equal(metrics.count2d, 1)
   assert.equal(metrics.pctAttack2d, 0)
+  assert.equal(metrics.count1, 1)
+  assert.equal(metrics.pct1, 25)
+  assert.equal(metrics.count3, 0)
+  assert.equal(metrics.pct3, 0)
+  assert.equal(metrics.countF2u, 0)
+  assert.equal(metrics.pctF2u, 0)
+  assert.equal(metrics.countF2d, 0)
+  assert.equal(metrics.pctF2d, 0)
   assert.equal(metrics.netAttackDelta, 50)
   assert.equal(metrics.status, "BULLISH ATTACK")
 })
@@ -2818,6 +2826,10 @@ test("Update 3: computeBasketAttackMetrics excludes failed red 2u bars and compu
   const metrics = Model.computeBasketAttackMetrics("SMH", "Semis", "Sector", holdings, candlesMap, null, "60")
   assert.equal(metrics.count2u, 1) // Only AAA counted; failed red 2u BBB excluded
   assert.equal(metrics.pct2u, 50)
+  assert.equal(metrics.countF2u, 1)
+  assert.equal(metrics.pctF2u, 50)
+  assert.equal(metrics.countF2d, 0)
+  assert.equal(metrics.pctF2d, 0)
   assert.equal(metrics.isSimultaneousBreak, false)
 
   // 70% support without Attack status -> HALF (0.5x), whereas 82% (>=80% Sim Break) -> FULL (1.0x)
@@ -3393,13 +3405,21 @@ test("alert log keeps the muted flag", () => {
 })
 
 test("sector analysis: sector definitions, query parsing, scenario matching, and sorting", () => {
-  // 1. Sector Definitions
+  // 1. Sector Definitions & Ticker Parsing
   const smh = Model.getSectorInfo("SMH")
   assert.equal(smh.symbol, "SMH")
   assert.equal(smh.name, "VanEck Semiconductor ETF")
   const xlc = Model.getSectorInfo("xlc")
   assert.equal(xlc.symbol, "XLC")
   assert.equal(Model.getSectorInfo("XYZ"), null)
+
+  assert.deepEqual(Model.parseSectorTickers("SMH"), ["SMH"])
+  assert.deepEqual(Model.parseSectorTickers("SMH,XLC,DIA"), ["SMH", "XLC", "DIA"])
+  assert.deepEqual(Model.parseSectorTickers("smh, xlc, dia"), ["SMH", "XLC", "DIA"])
+  assert.deepEqual(Model.parseSectorTickers("SMH, XLC, SMH, DIA"), ["SMH", "XLC", "DIA"])
+  assert.deepEqual(Model.parseSectorTickers("SMH, , XLC,"), ["SMH", "XLC"])
+  assert.deepEqual(Model.parseSectorTickers(""), [])
+  assert.deepEqual(Model.parseSectorTickers(null), [])
 
   // 2. Query Parsing
   assert.deepEqual(Model.parseScenarioQuery("1, hammer, 2dg"), [["1"], ["hammer"], ["2dg"]])
