@@ -35,11 +35,11 @@
     "broadening": true
   },
   "gridSymbols": [
-    "AMD",
-    "AMD",
-    "AMD",
-    "AMD",
-    "AMD"
+    "DIA",
+    "DIA",
+    "DIA",
+    "DIA",
+    "DIA"
   ],
   "gridSplits": {
     "2x2": {
@@ -124,7 +124,7 @@
           ],
           "zooms": [
             8,
-            8,
+            20,
             8,
             8,
             8
@@ -238,10 +238,10 @@
   ],
   "gridZooms": [
     8,
+    20,
     8,
-    42,
-    10,
-    10
+    8,
+    8
   ],
   "discordWebhook": "https://discord.com/api/webhooks/1555025989363310644/M0JepOpRsNNPbR_Ykk_-kgxc8plFo2Mfp7j0t_-Y7dv92osFqVITTKc5NcJ_qYA2v_TR",
   "signalStates": {
@@ -747,6 +747,38 @@
     "MH:30:1793910600:CONFLICT": "ARMED_SEEN"
   },
   "alertLog": [
+    {
+      "id": "DIA:60:1794425400:LONG:ARMED",
+      "timestamp": 1794430435344,
+      "timestampMs": 1794430435344,
+      "symbol": "DIA",
+      "kind": "STRAT",
+      "eventType": "ARMED",
+      "direction": "LONG",
+      "timeframe": "60",
+      "price": 524.455,
+      "triggerPrice": 524.4949951171875,
+      "title": "The Strat Armed: DIA [LONG]",
+      "summary": "Approaching 60 Trigger $524.49 (Cur: $524.46) | 7/9 rules ready.",
+      "body": "Approaching 60 Trigger $524.49 (Cur: $524.46) | 7/9 rules ready.",
+      "muted": true
+    },
+    {
+      "id": "UVXY:60:1794425400:SHORT:ARMED",
+      "timestamp": 1794430395152,
+      "timestampMs": 1794430395152,
+      "symbol": "UVXY",
+      "kind": "STRAT",
+      "eventType": "ARMED",
+      "direction": "SHORT",
+      "timeframe": "60",
+      "price": 16.55,
+      "triggerPrice": 16.545000076293945,
+      "title": "The Strat Armed: UVXY [SHORT]",
+      "summary": "Approaching 60 Trigger $16.55 (Cur: $16.55) | 7/9 rules ready.",
+      "body": "Approaching 60 Trigger $16.55 (Cur: $16.55) | 7/9 rules ready.",
+      "muted": true
+    },
     {
       "id": "DIA:30:1794425400:LONG:ARMED",
       "timestamp": 1794428697162,
@@ -1513,38 +1545,6 @@
       "title": "The Strat Armed: IWM [LONG]",
       "summary": "Approaching 30 Trigger $283.48 (Cur: $283.36) | 7/9 rules ready.",
       "body": "Approaching 30 Trigger $283.48 (Cur: $283.36) | 7/9 rules ready.",
-      "muted": true
-    },
-    {
-      "id": "META:60:1794414600:LONG:TRIGGERED",
-      "timestamp": 1794418754563,
-      "timestampMs": 1794418754563,
-      "symbol": "META",
-      "kind": "STRAT",
-      "eventType": "TRIGGERED",
-      "direction": "LONG",
-      "timeframe": "60",
-      "price": 643.385,
-      "triggerPrice": 642.7899780273438,
-      "title": "The Strat Alert: META [LONG]",
-      "summary": "9/9 rules verified on 60 setup. · Trigger: $642.79 | Stop: $640.00 | Target: 1D Pivot High $713.22",
-      "body": "9/9 rules verified on 60 setup. · Trigger: $642.79 | Stop: $640.00 | Target: 1D Pivot High $713.22",
-      "muted": true
-    },
-    {
-      "id": "META:60:1794414600:LONG:ARMED",
-      "timestamp": 1794418670571,
-      "timestampMs": 1794418670571,
-      "symbol": "META",
-      "kind": "STRAT",
-      "eventType": "ARMED",
-      "direction": "LONG",
-      "timeframe": "60",
-      "price": 642.65,
-      "triggerPrice": 642.7899780273438,
-      "title": "The Strat Armed: META [LONG]",
-      "summary": "Approaching 60 Trigger $642.79 (Cur: $642.65) | 8/9 rules ready.",
-      "body": "Approaching 60 Trigger $642.79 (Cur: $642.65) | 8/9 rules ready.",
       "muted": true
     }
   ],
