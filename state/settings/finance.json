@@ -28,18 +28,18 @@
   "detailRange": "1M",
   "gridMode": "2+3",
   "gridSync": {
-    "symbol": true,
-    "timeframe": false,
+    "broadening": false,
     "crosshair": false,
+    "symbol": true,
     "time": false,
-    "broadening": true
+    "timeframe": false
   },
   "gridSymbols": [
-    "DIA",
-    "DIA",
-    "DIA",
-    "DIA",
-    "DIA"
+    "AMD",
+    "AMD",
+    "AMD",
+    "AMD",
+    "AMD"
   ],
   "gridSplits": {
     "2x2": {
@@ -237,11 +237,11 @@
     "1M"
   ],
   "gridZooms": [
-    8,
+    20,
     20,
     8,
     8,
-    8
+    10
   ],
   "discordWebhook": "https://discord.com/api/webhooks/1555025989363310644/M0JepOpRsNNPbR_Ykk_-kgxc8plFo2Mfp7j0t_-Y7dv92osFqVITTKc5NcJ_qYA2v_TR",
   "signalStates": {
