@@ -28,18 +28,18 @@
   "detailRange": "1M",
   "gridMode": "2+3",
   "gridSync": {
-    "symbol": true,
-    "timeframe": false,
+    "broadening": true,
     "crosshair": false,
+    "symbol": true,
     "time": false,
-    "broadening": false
+    "timeframe": false
   },
   "gridSymbols": [
-    "AMD",
-    "AMD",
-    "AMD",
-    "AMD",
-    "AMD"
+    "SPY",
+    "SPY",
+    "SPY",
+    "SPY",
+    "SPY"
   ],
   "gridSplits": {
     "2x2": {
@@ -238,8 +238,8 @@
   ],
   "gridZooms": [
     8,
-    20,
-    8,
+    27,
+    31,
     10,
     10
   ],
