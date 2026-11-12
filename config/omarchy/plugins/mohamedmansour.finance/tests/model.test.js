@@ -4325,3 +4325,153 @@ test("Contradiction 14: Canonical Stop-Loss Placements (Tightest Stop = spread +
   const r8Tight = resTierTight.rules.find(r => r.id === 8)
   assert.match(r8Tight.detail, /Entry Open \(Tight Stop\)/)
 })
+
+test("Contradiction 15: Pivot Machine Gun (PMG) Usage & Target Resolution (Motherbar Continuity & Guaranteed Final Slot)", () => {
+  // 1. Motherbar Pivot Continuity: Inside bar (1) in the sequence does not break PMG
+  const pmgInsideCandles = [
+    { timestamp: 1000, open: 115, high: 116, low: 110, close: 112 }, // Pivot 5 (116)
+    { timestamp: 2000, open: 112, high: 114, low: 108, close: 110 }, // Pivot 4 (114)
+    { timestamp: 3000, open: 110, high: 112, low: 104, close: 106 }, // Pivot 3 (Motherbar: 112)
+    { timestamp: 4000, open: 107, high: 110, low: 105, close: 108 }, // Inside bar 1 (high 110 < 112)
+    { timestamp: 5000, open: 107, high: 111, low: 102, close: 104 }, // Pivot 2 (2d breakdown, high 111 < motherbar 112, but > inside bar 110)
+    { timestamp: 6000, open: 104, high: 106, low: 100, close: 102 }, // Pivot 1 (p1 trigger: 106)
+    { timestamp: 7000, open: 103, high: 108, low: 102, close: 107 }  // c0 (reversal above 106)
+  ]
+  const pmgRes = Model.detectPivotMachineGun(pmgInsideCandles, true)
+  assert.equal(pmgRes.isPMG, true)
+  assert.equal(pmgRes.triggerPrice, 106)
+  assert.equal(pmgRes.topTarget, 116)
+  assert.ok(pmgRes.pivots.includes(106))
+  assert.ok(pmgRes.pivots.includes(111))
+  assert.ok(pmgRes.pivots.includes(112))
+  assert.ok(pmgRes.pivots.includes(114))
+  assert.ok(pmgRes.pivots.includes(116))
+
+  // 2. Flat extremes (equal highs) allowed without aborting
+  const pmgFlatCandles = [
+    { timestamp: 1000, open: 111, high: 112, low: 108, close: 109 },
+    { timestamp: 2000, open: 109, high: 110, low: 106, close: 107 },
+    { timestamp: 3000, open: 107, high: 108, low: 104, close: 105 },
+    { timestamp: 4000, open: 107, high: 108, low: 104, close: 105 }, // Equal high (108)
+    { timestamp: 5000, open: 105, high: 106, low: 102, close: 103 },
+    { timestamp: 6000, open: 103, high: 104, low: 100, close: 101 }, // p1 trigger: 104
+    { timestamp: 7000, open: 102, high: 105, low: 101, close: 104.5 }
+  ]
+  const pmgFlat = Model.detectPivotMachineGun(pmgFlatCandles, true)
+  assert.equal(pmgFlat.isPMG, true)
+  assert.equal(pmgFlat.triggerPrice, 104)
+  assert.equal(pmgFlat.topTarget, 112)
+
+  // 3. Bearish PMG with higher lows and inside bar
+  const pmgBearCandles = [
+    { timestamp: 1000, open: 85, high: 90, low: 84, close: 88 },  // Low 84
+    { timestamp: 2000, open: 88, high: 92, low: 86, close: 90 },  // Low 86
+    { timestamp: 3000, open: 90, high: 96, low: 88, close: 94 },  // Motherbar Low 88
+    { timestamp: 4000, open: 93, high: 95, low: 90, close: 92 },  // Inside bar Low 90
+    { timestamp: 5000, open: 93, high: 98, low: 89, close: 96 },  // Low 89 (> motherbar 88)
+    { timestamp: 6000, open: 96, high: 102, low: 94, close: 100 }, // p1 trigger: 94
+    { timestamp: 7000, open: 97, high: 98, low: 92, close: 93 }    // c0 (reversal breakdown under 94)
+  ]
+  const pmgBear = Model.detectPivotMachineGun(pmgBearCandles, false)
+  assert.equal(pmgBear.isPMG, true)
+  assert.equal(pmgBear.triggerPrice, 94)
+  assert.equal(pmgBear.topTarget, 84)
+
+  // 4. Target pipeline integration & Guaranteed Final Slot
+  const dailyBull = [
+    { timestamp: 100, open: 90, high: 100, low: 85, close: 95 },
+    { timestamp: 200, open: 95, high: 120, low: 92, close: 115 },
+    { timestamp: 300, open: 115, high: 125, low: 102, close: 110 }
+  ]
+  const chkPmg = Model.evaluateStratChecklist("AAPL", pmgInsideCandles, dailyBull, { regularMarketPrice: 107 })
+  assert.equal(chkPmg.pmg.isPMG, true)
+  assert.ok(chkPmg.targets.length > 0)
+  // T1 is the first untagged stacked pivot above entry trigger (106) -> 110 or 111
+  assert.equal(chkPmg.targets[0].name.includes("PMG"), true)
+  // Final target is guaranteed to be PMG Final ($116)
+  const finalT = chkPmg.targets[chkPmg.targets.length - 1]
+  assert.equal(finalT.name, "60m PMG Final")
+  assert.equal(finalT.price, 116)
+  // Take Action Window targetPrice binds to first untagged target
+  assert.equal(chkPmg.takeActionWindow.targetPrice, chkPmg.targets[0].price)
+
+  // 5. Rule 2 PMG Signal Qualification
+  assert.equal(chkPmg.isTriggered, true)
+  const r2 = chkPmg.rules.find(r => r.id === 2)
+  assert.equal(r2.passed, true)
+  assert.match(r2.detail, /PMG: \d+ Stacked Pivots/)
+})
+
+test("Contradiction 12: Broadening Formation Drawing & Zero Breach Tolerance (Truth #3)", () => {
+  // 1. Verify BF_EPS_REL export and elimination of arbitrary BF_BREACH_TOL_REL
+  assert.equal(typeof Model.BF_EPS_REL, "number")
+  assert.equal(Model.BF_EPS_REL, 0.00001)
+
+  // 2. Zero Breach Tolerance Test:
+  // Initial swing points:
+  //   idx 2: swing high a1 (high = 100)
+  //   idx 4: swing high a2 (high = 102, slope = (102 - 100) / 2 = 1.0)
+  //   At idx 5: projected ray is 102 + 1.0 = 103.0
+  //   idx 5 prints high = 103.20 (a 20-cent poke = 0.19% breach)
+  // Under the refuted 0.5% tolerance (BF_BREACH_TOL_REL = 0.005), 103.20 was within the 103.516 cushion,
+  // so the stale line anchored at idx 4 was falsely retained.
+  // Under canonical zero breach tolerance, any penetration beyond epsilon immediately invalidates the
+  // ray and redraws the line from the new extreme at idx 5.
+  const candlesBullBreach = [
+    { timestamp: 1000, open: 90, high: 95, low: 88, close: 92 },
+    { timestamp: 2000, open: 92, high: 94, low: 85, close: 89 },
+    { timestamp: 3000, open: 90, high: 100, low: 88, close: 98 }, // a1 (idx 2)
+    { timestamp: 4000, open: 98, high: 95, low: 90, close: 93 },
+    { timestamp: 5000, open: 94, high: 102, low: 92, close: 101 }, // prior a2 (idx 4, proj at 5 is 103.0)
+    { timestamp: 6000, open: 101, high: 103.20, low: 99, close: 102 }, // post (idx 5) breaches 103.0
+    { timestamp: 7000, open: 102, high: 102.50, low: 98, close: 100 }
+  ]
+
+  const rayBull = Model.computeRayForOrigin(candlesBullBreach, 0, candlesBullBreach.length, true, 2)
+  assert.ok(rayBull)
+  // Anchor 2 must be redrawn immediately to the newest extreme at idx 5 (high 103.2)
+  assert.equal(rayBull.anchor2.index, 5)
+  assert.equal(rayBull.anchor2.price, 103.2)
+  assert.equal(rayBull.anchor1.index, 2)
+  assert.equal(rayBull.anchor1.price, 100)
+
+  // 3. Lower boundary zero breach tolerance:
+  //   idx 2: swing low a1 (low = 100)
+  //   idx 4: swing low a2 (low = 98, slope = (98 - 100) / 2 = -1.0)
+  //   At idx 5: projected lower ray is 98 - 1.0 = 97.0
+  //   idx 5 prints low = 96.80 (20-cent breach below 97.0)
+  const candlesBearBreach = [
+    { timestamp: 1000, open: 105, high: 110, low: 103, close: 108 },
+    { timestamp: 2000, open: 108, high: 109, low: 104, close: 106 },
+    { timestamp: 3000, open: 104, high: 106, low: 100, close: 102 }, // a1 (idx 2, low 100)
+    { timestamp: 4000, open: 102, high: 105, low: 101, close: 103 },
+    { timestamp: 5000, open: 103, high: 104, low: 98, close: 99 },   // prior a2 (idx 4, low 98, proj at 5 is 97.0)
+    { timestamp: 6000, open: 99, high: 100, low: 96.80, close: 97 }, // post (idx 5) breaches 97.0
+    { timestamp: 7000, open: 97, high: 99, low: 97.50, close: 98 }
+  ]
+
+  const rayBear = Model.computeRayForOrigin(candlesBearBreach, 0, candlesBearBreach.length, false, 2)
+  assert.ok(rayBear)
+  // Anchor 2 must be redrawn immediately to the newest lower low at idx 5 (low 96.8)
+  assert.equal(rayBear.anchor2.index, 5)
+  assert.equal(rayBear.anchor2.price, 96.8)
+  assert.equal(rayBear.anchor1.index, 2)
+  assert.equal(rayBear.anchor1.price, 100)
+
+  // 4. Sub-line bar (within boundary) does not trigger breach; anchor 2 correctly remains at idx 4
+  const candlesUnderLine = [
+    { timestamp: 1000, open: 90, high: 95, low: 88, close: 92 },
+    { timestamp: 2000, open: 92, high: 94, low: 85, close: 89 },
+    { timestamp: 3000, open: 90, high: 100, low: 88, close: 98 }, // a1 (idx 2, high 100)
+    { timestamp: 4000, open: 98, high: 95, low: 90, close: 93 },
+    { timestamp: 5000, open: 94, high: 104, low: 92, close: 101 }, // a2 (idx 4, high 104, slope = 2.0, proj at 5 is 106.0)
+    { timestamp: 6000, open: 101, high: 103.00, low: 99, close: 102 }, // post (idx 5) = 103.00 < 106.0 and < 104
+    { timestamp: 7000, open: 102, high: 101.00, low: 98, close: 100 }
+  ]
+  const rayUnder = Model.computeRayForOrigin(candlesUnderLine, 0, candlesUnderLine.length, true, 2)
+  assert.ok(rayUnder)
+  assert.equal(rayUnder.anchor1.index, 2)
+  assert.equal(rayUnder.anchor2.index, 4)
+  assert.equal(rayUnder.anchor2.price, 104)
+  assert.equal(rayUnder.slope, 2.0)
+})
