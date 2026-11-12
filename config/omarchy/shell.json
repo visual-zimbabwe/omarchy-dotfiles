@@ -1,5 +1,6 @@
 {
   "bar": {
+    "background": "glassy",
     "layout": {
       "center": [
         {
@@ -7,6 +8,77 @@
           "formatAlt": "d MMMM 'W'ww yyyy",
           "id": "omarchy.clock",
           "verticalFormat": "HH\n—\nmm"
+        }
+      ],
+      "centerBegin": [
+        {
+          "id": "omarchy.indicators"
+        }
+      ],
+      "centerEnd": [
+        {
+          "cities": [
+            {
+              "name": "Vancouver",
+              "zone": "America/Vancouver"
+            },
+            {
+              "lat": 43.70643,
+              "lon": -79.39864,
+              "name": "Toronto",
+              "region": "Ontario, CA",
+              "zone": "America/Toronto"
+            },
+            {
+              "lat": -17.82772,
+              "lon": 31.05337,
+              "name": "Harare",
+              "region": "ZW",
+              "zone": "Africa/Harare"
+            },
+            {
+              "lat": 40.71427,
+              "lon": -74.00597,
+              "name": "New York",
+              "region": "US",
+              "zone": "America/New_York"
+            },
+            {
+              "lat": 38.89511,
+              "lon": -77.03637,
+              "name": "Washington D.C.",
+              "region": "District of Columbia, US",
+              "zone": "America/New_York"
+            },
+            {
+              "lat": 53.48095,
+              "lon": -2.23743,
+              "name": "Manchester",
+              "region": "England, GB",
+              "zone": "Europe/London"
+            },
+            {
+              "lat": 29.76328,
+              "lon": -95.36327,
+              "name": "Houston",
+              "region": "Texas, US",
+              "zone": "America/Chicago"
+            },
+            {
+              "lat": 41.85003,
+              "lon": -87.65005,
+              "name": "Chicago",
+              "region": "Illinois, US",
+              "zone": "America/Chicago"
+            }
+          ],
+          "id": "omarchy.elsewhen"
+        },
+        {
+          "id": "omarchy.weather"
+        },
+        {
+          "id": "omarchy.system-update"
         }
       ],
       "left": [
@@ -38,12 +110,12 @@
           "id": "yamz8.omanki"
         },
         {
+          "audioFormat": "mp3",
+          "checkoutDir": "/home/juwimana/src/github.com/yt-dlp",
+          "dest": "/home/juwimana/Downloads",
           "id": "alexzeitler.ytdlp",
           "mode": "audio",
-          "quality": "best",
-          "audioFormat": "mp3",
-          "dest": "/home/juwimana/Downloads",
-          "checkoutDir": "/home/juwimana/src/github.com/yt-dlp"
+          "quality": "best"
         },
         {
           "id": "mohamedmansour.finance",
@@ -82,81 +154,9 @@
           "id": "omarchy.power"
         }
       ],
-      "centerBegin": [
-        {
-          "id": "omarchy.indicators"
-        }
-      ],
-      "centerEnd": [
-        {
-          "id": "omarchy.elsewhen",
-          "cities": [
-            {
-              "name": "Vancouver",
-              "zone": "America/Vancouver"
-            },
-            {
-              "name": "Toronto",
-              "zone": "America/Toronto",
-              "lat": 43.70643,
-              "lon": -79.39864,
-              "region": "Ontario, CA"
-            },
-            {
-              "name": "Harare",
-              "zone": "Africa/Harare",
-              "lat": -17.82772,
-              "lon": 31.05337,
-              "region": "ZW"
-            },
-            {
-              "name": "New York",
-              "zone": "America/New_York",
-              "lat": 40.71427,
-              "lon": -74.00597,
-              "region": "US"
-            },
-            {
-              "name": "Washington D.C.",
-              "zone": "America/New_York",
-              "lat": 38.89511,
-              "lon": -77.03637,
-              "region": "District of Columbia, US"
-            },
-            {
-              "name": "Manchester",
-              "zone": "Europe/London",
-              "lat": 53.48095,
-              "lon": -2.23743,
-              "region": "England, GB"
-            },
-            {
-              "name": "Houston",
-              "zone": "America/Chicago",
-              "lat": 29.76328,
-              "lon": -95.36327,
-              "region": "Texas, US"
-            },
-            {
-              "name": "Chicago",
-              "zone": "America/Chicago",
-              "lat": 41.85003,
-              "lon": -87.65005,
-              "region": "Illinois, US"
-            }
-          ]
-        },
-        {
-          "id": "omarchy.weather"
-        },
-        {
-          "id": "omarchy.system-update"
-        }
-      ],
       "tray": []
     },
-    "position": "top",
-    "transparent": true
+    "position": "top"
   },
   "cloneSourceRestores": [
     "juwimana.lock"

@@ -28,11 +28,11 @@
   "detailRange": "1M",
   "gridMode": "2+3",
   "gridSync": {
-    "broadening": false,
-    "crosshair": false,
     "symbol": true,
+    "timeframe": false,
+    "crosshair": false,
     "time": false,
-    "timeframe": false
+    "broadening": false
   },
   "gridSymbols": [
     "AMD",
@@ -165,7 +165,7 @@
             8,
             8,
             8,
-            11
+            9
           ],
           "gridMode": "2+3"
         },
@@ -237,10 +237,10 @@
     "1M"
   ],
   "gridZooms": [
-    20,
+    8,
     20,
     8,
-    8,
+    10,
     10
   ],
   "discordWebhook": "https://discord.com/api/webhooks/1555025989363310644/M0JepOpRsNNPbR_Ykk_-kgxc8plFo2Mfp7j0t_-Y7dv92osFqVITTKc5NcJ_qYA2v_TR",
