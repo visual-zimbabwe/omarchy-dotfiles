@@ -4064,3 +4064,191 @@ test("Contradiction 4: Momentum vs. Retracement (The One-Bar Test)", () => {
   const res8 = Model.classifyMomentumOrRetracement(candlesFlat, true, false)
   assert.equal(res8.style, "MOMENTUM") // defaults to Green -> matches Long
 })
+
+test("Contradiction 6: 2-1-2 Reversal Magnitude Target (Canonical p2 extreme as T1)", () => {
+  // Test 1: 60m 2d-1-2u Bullish Reversal targets 60m Motherbar High (p2) before Daily High
+  const daily1 = [
+    { timestamp: 100, open: 490, high: 520, low: 500, close: 510 },
+    { timestamp: 200, open: 510, high: 515, low: 495, close: 498 }, // 1D High = 515, Low = 495 (2D bar breaking 500)
+    { timestamp: 300, open: 498, high: 508, low: 494, close: 504 } // curPrice: 502.5 (2d bar, Green)
+  ]
+  const hourly1 = [
+    { timestamp: 1000, open: 508, high: 510, low: 500, close: 502 },
+    { timestamp: 2000, open: 502, high: 505, low: 497, close: 499 }, // p2: 2d (high: 505)
+    { timestamp: 3000, open: 499, high: 502, low: 498, close: 501 }, // p1: 1 (inside 505 - 497, trigger: 502)
+    { timestamp: 4000, open: 501, high: 503, low: 500.5, close: 502.5 } // cur: 2u triggered at 502.5
+  ]
+  const res1 = Model.evaluateStratChecklist("SPY", hourly1, daily1, { regularMarketPrice: 502.5 })
+  assert.equal(res1.direction, "LONG")
+  assert.equal(res1.isTradeable, true)
+  assert.equal(res1.triggerPrice, 502)
+  // T1 must be 505 (60m Motherbar High), NOT overshooting to 515 (1D High)!
+  assert.equal(res1.targetPrice, 505)
+  assert.match(res1.targetName, /Motherbar High/)
+  assert.equal(res1.targets[0].price, 505)
+  assert.equal(res1.targets[1].price, 515)
+  assert.equal(res1.targets[1].name, "1D High")
+  // Domino cascade points to T2 (1D High 515) which triggers Daily 2d-2u Bullish Reversal
+  assert.ok(res1.domino)
+  assert.equal(res1.domino.hasDomino, true)
+  assert.equal(res1.domino.targetPrice, 515)
+  assert.equal(res1.domino.triggeredSignal, "Daily 2d-2u Bullish Reversal")
+  assert.equal(res1.domino.isT1Domino, false)
+
+  // Test 2: 60m 2u-1-2d Bearish Reversal targets 60m Motherbar Low (p2) before Daily Low
+  const daily2 = [
+    { timestamp: 100, open: 520, high: 505, low: 480, close: 490 },
+    { timestamp: 200, open: 490, high: 512, low: 485, close: 508 }, // 1D Low = 485, High = 512 (2U bar breaking 505)
+    { timestamp: 300, open: 505, high: 515, low: 492, close: 496 } // curPrice: 497.5 (2u bar, Red)
+  ]
+  const hourly2 = [
+    { timestamp: 1000, open: 492, high: 495, low: 488, close: 494 },
+    { timestamp: 2000, open: 494, high: 503, low: 495, close: 501 }, // p2: 2u (low: 495)
+    { timestamp: 3000, open: 501, high: 502, low: 498, close: 499 }, // p1: 1 (inside 503 - 495, trigger: 498)
+    { timestamp: 4000, open: 499, high: 499.5, low: 497, close: 497.5 } // cur: 2d triggered at 497.5
+  ]
+  const res2 = Model.evaluateStratChecklist("QQQ", hourly2, daily2, { regularMarketPrice: 497.5 })
+  assert.equal(res2.direction, "SHORT")
+  assert.equal(res2.isTradeable, true)
+  assert.equal(res2.triggerPrice, 498)
+  // T1 must be 495 (60m Motherbar Low), NOT overshooting to 485 (1D Low)!
+  assert.equal(res2.targetPrice, 495)
+  assert.match(res2.targetName, /Motherbar Low/)
+  assert.equal(res2.targets[0].price, 495)
+  assert.equal(res2.targets[1].price, 485)
+  assert.equal(res2.targets[1].name, "1D Low")
+  assert.ok(res2.domino)
+  assert.equal(res2.domino.hasDomino, true)
+  assert.equal(res2.domino.targetPrice, 485)
+  assert.equal(res2.domino.triggeredSignal, "Daily 2u-2d Bearish Reversal")
+
+  // Test 3: Confluent collision between p2 extreme and Daily High deduplicates while preserving Domino
+  const tD1 = 86400 * 100
+  const tD2 = 86400 * 101
+  const tD3 = 86400 * 102
+  const daily3 = [
+    { timestamp: tD1, open: 490, high: 510, low: 500, close: 505 },
+    { timestamp: tD2, open: 505, high: 505, low: 490, close: 492 }, // 1D High = 505, Low = 490 (2D bar breaking 500)
+    { timestamp: tD3, open: 495, high: 503, low: 488, close: 502 } // curPrice: 502 (2d bar, Green)
+  ]
+  const hourly3 = [
+    { timestamp: tD2 + 3600 * 4, open: 496, high: 502, low: 495, close: 498 },
+    { timestamp: tD2 + 3600 * 5, open: 498, high: 505, low: 496, close: 497 }, // p2: 2d on Day 2 (high: 505)
+    { timestamp: tD3 + 3600 * 1, open: 497, high: 501, low: 496.5, close: 500 }, // p1: 1 on Day 3 (trigger: 501)
+    { timestamp: tD3 + 3600 * 2, open: 500, high: 502.5, low: 499.5, close: 502 } // cur: 2u triggered at 501
+  ]
+  const res3 = Model.evaluateStratChecklist("SPY", hourly3, daily3, { regularMarketPrice: 502 })
+  assert.equal(res3.targetPrice, 505)
+  // Only 1 target at 505 (deduplicated)
+  const at505 = res3.targets.filter(t => Math.abs(t.price - 505) < 0.01)
+  assert.equal(at505.length, 1)
+  // Merged target retains Domino metadata
+  assert.equal(at505[0].dominoSignal, "Daily 2d-2u Bullish Reversal")
+  assert.ok(res3.domino)
+  assert.equal(res3.domino.targetPrice, 505)
+  assert.equal(res3.domino.isT1Domino, true)
+
+  // Test 4: Gapped past p2 (p2 already tagged at entry inception) naturally promotes Daily High to T1
+  const hourly4 = [
+    { timestamp: 1000, open: 502, high: 504, low: 500, close: 502 },
+    { timestamp: 2000, open: 502, high: 505, low: 497, close: 499 }, // p2: 2d (high: 505)
+    { timestamp: 3000, open: 499, high: 502, low: 498, close: 501 }, // p1: 1 (trigger: 502)
+    { timestamp: 4000, open: 506, high: 508, low: 505.5, close: 507 } // Gapped open at 506 (above p2 505!)
+  ]
+  const res4 = Model.evaluateStratChecklist("SPY", hourly4, daily1, { regularMarketPrice: 507 })
+  assert.equal(res4.isTradeable, true)
+  // 505 was already breached at open (entryBaseline = 506), so T1 is cleanly promoted to 515 (1D High)
+  assert.equal(res4.targetPrice, 515)
+  assert.equal(res4.targetName, "1D High")
+})
+
+test("Contradiction 7: 1-3-2 Rev Strat Canonical Validation (1-3-[Hammer/Shooter]-2)", () => {
+  const daily = [
+    { timestamp: 100, open: 100, high: 110, low: 95, close: 108 },
+    { timestamp: 200, open: 108, high: 120, low: 105, close: 118 },
+    { timestamp: 300, open: 112, high: 125, low: 110, close: 120 }
+  ]
+
+  // Test 1: Valid Bullish 1-3-2 RevStrat:
+  // p3: 200-210 (Motherbar)
+  // p2: 202-208 (Inside Bar = 1)
+  // p1: 198-212, open=210, close=211 (Scenario 3 Outside Bar that closes in top 33% = Hammer!)
+  // c0: open=211.5, high=213, low=211, close=212.5 (2u breakout)
+  const hourlyBullHammer = [
+    { timestamp: 1000, open: 202, high: 210, low: 200, close: 208 }, // p3
+    { timestamp: 2000, open: 204, high: 208, low: 202, close: 206 }, // p2: 1 (inside p3)
+    { timestamp: 3000, open: 209.5, high: 212, low: 198, close: 211 }, // p1: 3 Outside Bar (range=14, body: 209.5-211, bottom=209.5 >= 198 + 9.33 = 207.33, upper wick=1 <= 1.4 -> Hammer!)
+    { timestamp: 4000, open: 211.5, high: 213, low: 211, close: 212.5 } // c0: 2u triggered at 212
+  ]
+  const resBull = Model.evaluateStratChecklist("SPY", hourlyBullHammer, daily, { regularMarketPrice: 212.5 })
+  const r2Bull = resBull.rules.find(r => r.id === 2)
+  assert.equal(r2Bull.passed, true)
+  assert.match(resBull.signalName, /1-3-2 RevStrat Up/)
+  assert.match(r2Bull.detail, /Hammer/)
+  // Stop is anchored to entry bar low - 0.01 (211 - 0.01 = 210.99), NOT the hammer wick at 198!
+  assert.equal(resBull.stopPrice, 210.99)
+  const r8Bull = resBull.rules.find(r => r.id === 8)
+  assert.match(r8Bull.detail, /Entry Low - \$0\.01/)
+
+  // Test 2: Gated Bullish 1-3-2 RevStrat where Scenario 3 bar fails to close as a Hammer (e.g. Doji or Red trend bar):
+  // p1: 198-212, open=206, close=200 (Red solid body closing near low = NOT a Hammer)
+  const hourlyBullInvalid = [
+    { timestamp: 1000, open: 202, high: 210, low: 200, close: 208 }, // p3
+    { timestamp: 2000, open: 204, high: 208, low: 202, close: 206 }, // p2: 1 (inside p3)
+    { timestamp: 3000, open: 206, high: 212, low: 198, close: 200 }, // p1: 3 Outside Bar (closes near low, NO rejection wick)
+    { timestamp: 4000, open: 211.5, high: 213, low: 211, close: 212.5 } // c0: 2u
+  ]
+  const resBullInv = Model.evaluateStratChecklist("SPY", hourlyBullInvalid, daily, { regularMarketPrice: 212.5 })
+  const r2BullInv = resBullInv.rules.find(r => r.id === 2)
+  assert.equal(r2BullInv.passed, false)
+  assert.match(r2BullInv.detail, /failed to close as Hammer \(rejection required for 1-3-2 RevStrat\)/)
+
+  // Test 3: Valid Bearish 1-3-2 RevStrat:
+  // p3: 200-210
+  // p2: 202-208 (Inside Bar = 1)
+  // p1: 198-212, open=200, close=199 (Scenario 3 Outside Bar closing in bottom 33% with long upper wick = Shooter!)
+  // c0: open=198.5, high=199, low=197, close=197.5 (2d breakout)
+  const dailyBear = [
+    { timestamp: 100, open: 220, high: 225, low: 205, close: 210 },
+    { timestamp: 200, open: 210, high: 215, low: 195, close: 200 },
+    { timestamp: 300, open: 200, high: 205, low: 190, close: 195 }
+  ]
+  const hourlyBearShooter = [
+    { timestamp: 1000, open: 202, high: 210, low: 200, close: 208 }, // p3
+    { timestamp: 2000, open: 204, high: 208, low: 202, close: 206 }, // p2: 1 (inside p3)
+    { timestamp: 3000, open: 200, high: 212, low: 198, close: 199 }, // p1: 3 Outside Bar (range=14, body: 199-200, top=200 <= 198 + 4.67 = 202.67, lower wick=1 <= 1.4 -> Shooter!)
+    { timestamp: 4000, open: 198.5, high: 199, low: 197, close: 197.5 } // c0: 2d triggered at 198
+  ]
+  const resBear = Model.evaluateStratChecklist("QQQ", hourlyBearShooter, dailyBear, { regularMarketPrice: 197.5 })
+  const r2Bear = resBear.rules.find(r => r.id === 2)
+  assert.equal(r2Bear.passed, true)
+  assert.match(resBear.signalName, /1-3-2 RevStrat Down/)
+  assert.match(r2Bear.detail, /Shooter/)
+  // Stop is anchored to entry bar high + 0.01 (199 + 0.01 = 199.01), NOT the shooter wick at 212!
+  assert.equal(resBear.stopPrice, 199.01)
+  const r8Bear = resBear.rules.find(r => r.id === 8)
+  assert.match(r8Bear.detail, /Entry High \+ \$0\.01/)
+
+  // Test 4: Gated Bearish 1-3-2 RevStrat where Scenario 3 bar fails to close as a Shooter:
+  // p1: 198-212, open=202, close=210 (Green solid body = NOT a Shooter)
+  const hourlyBearInvalid = [
+    { timestamp: 1000, open: 202, high: 210, low: 200, close: 208 }, // p3
+    { timestamp: 2000, open: 204, high: 208, low: 202, close: 206 }, // p2: 1 (inside p3)
+    { timestamp: 3000, open: 202, high: 212, low: 198, close: 210 }, // p1: 3 Outside Bar (closes near high, NO shooter wick)
+    { timestamp: 4000, open: 198.5, high: 199, low: 197, close: 197.5 } // c0: 2d
+  ]
+  const resBearInv = Model.evaluateStratChecklist("QQQ", hourlyBearInvalid, dailyBear, { regularMarketPrice: 197.5 })
+  const r2BearInv = resBearInv.rules.find(r => r.id === 2)
+  assert.equal(r2BearInv.passed, false)
+  assert.match(r2BearInv.detail, /failed to close as Shooter \(rejection required for 1-3-2 RevStrat\)/)
+
+  // Test 5: Sector query token "1-3-2" in matchesScenarioTokens
+  // Matches valid bullish 1-3-2
+  assert.equal(Model.matchesScenarioQuery(hourlyBullHammer, { regularMarketPrice: 212.5 }, "1-3-2"), true)
+  // Rejects invalid bullish 1-3-2 (3-bar did not close as Hammer)
+  assert.equal(Model.matchesScenarioQuery(hourlyBullInvalid, { regularMarketPrice: 212.5 }, "1-3-2"), false)
+  // Matches valid bearish 1-3-2
+  assert.equal(Model.matchesScenarioQuery(hourlyBearShooter, { regularMarketPrice: 197.5 }, "1-3-2"), true)
+  // Rejects invalid bearish 1-3-2 (3-bar did not close as Shooter)
+  assert.equal(Model.matchesScenarioQuery(hourlyBearInvalid, { regularMarketPrice: 197.5 }, "1-3-2"), false)
+})
