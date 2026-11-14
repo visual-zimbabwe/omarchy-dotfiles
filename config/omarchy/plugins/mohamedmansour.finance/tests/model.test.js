@@ -4521,4 +4521,18 @@ test("updateCachedDevelopingCandles updates only matching cached timeframes in-p
   assert.ok(pruned["NVDA_1D"])
   assert.ok(pruned["NVDA_60"])
   assert.equal(pruned["OLD_1D"], undefined)
+
+  // Protected keys & LRU accessTimes preserve 1W/1M charts even when candle timestamps are older
+  const mixedCache = {
+    "AAPL_1M": [{ timestamp: 500, open: 100, high: 101, low: 99, close: 100, volume: 10 }],
+    "AAPL_1W": [{ timestamp: 900, open: 100, high: 101, low: 99, close: 100, volume: 10 }],
+    "TSLA_60": [{ timestamp: 99999, open: 200, high: 201, low: 199, close: 200, volume: 10 }],
+    "MSFT_60": [{ timestamp: 99998, open: 300, high: 301, low: 299, close: 300, volume: 10 }]
+  }
+  const accessTimes = { "AAPL_1W": 500000, "TSLA_60": 100000, "MSFT_60": 200000 }
+  const protectedKeys = { "AAPL_1M": true }
+  const prunedLru = Model.pruneChartCache(mixedCache, 2, accessTimes, protectedKeys)
+  assert.equal(Object.keys(prunedLru).length, 2)
+  assert.ok(prunedLru["AAPL_1M"])
+  assert.ok(prunedLru["AAPL_1W"])
 })

@@ -7640,27 +7640,41 @@ function updateCachedDevelopingCandles(cache, sym, quote, timeframes, nowDate) {
   return changedKeys;
 }
 
-function pruneChartCache(cache, maxEntries) {
+function pruneChartCache(cache, maxEntries, accessTimes, protectedKeys) {
   if (!cache || typeof cache !== "object") return {};
-  var cap = (isFinite(maxEntries) && maxEntries > 0) ? Math.floor(maxEntries) : 220;
+  var cap = (isFinite(maxEntries) && maxEntries > 0) ? Math.floor(maxEntries) : 600;
   var keys = Object.keys(cache);
   if (keys.length <= cap) return cache;
 
+  var access = (accessTimes && typeof accessTimes === "object") ? accessTimes : null;
+  var prot = (protectedKeys && typeof protectedKeys === "object") ? protectedKeys : null;
+  var pruned = {};
+  var kept = 0;
   var ranked = [];
+
   for (var i = 0; i < keys.length; i++) {
     var k = keys[i];
-    var list = cache[k];
-    var lastTs = 0;
-    if (Array.isArray(list) && list.length > 0) {
-      var last = list[list.length - 1];
-      if (last && isFinite(last.timestamp)) lastTs = last.timestamp;
+    if (prot && prot[k]) {
+      pruned[k] = cache[k];
+      kept++;
+      continue;
     }
-    ranked.push({ key: k, ts: lastTs });
+    var score = 0;
+    if (access && isFinite(access[k])) {
+      score = access[k];
+    } else {
+      var list = cache[k];
+      if (Array.isArray(list) && list.length > 0) {
+        var last = list[list.length - 1];
+        if (last && isFinite(last.timestamp)) score = last.timestamp;
+      }
+    }
+    ranked.push({ key: k, score: score });
   }
-  ranked.sort(function (a, b) { return b.ts - a.ts; });
 
-  var pruned = {};
-  for (var j = 0; j < cap && j < ranked.length; j++) {
+  ranked.sort(function (a, b) { return b.score - a.score; });
+  var remaining = Math.max(0, cap - kept);
+  for (var j = 0; j < remaining && j < ranked.length; j++) {
     var rk = ranked[j].key;
     pruned[rk] = cache[rk];
   }

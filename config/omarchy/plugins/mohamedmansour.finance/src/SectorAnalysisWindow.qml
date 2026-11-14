@@ -249,16 +249,22 @@ FloatingWindow {
         }
     }
 
-    property int pendingGlobalBarCount: -1
+    property int pendingGlobalBarCount: -2
+    function normalizeGlobalZoom(nextZoom) {
+        if (nextZoom === -1 || String(nextZoom).trim().toUpperCase() === "ALL")
+            return -1;
+        return (typeof Model.clampBarCount === "function") ? Model.clampBarCount(nextZoom) : Math.max(8, parseInt(nextZoom, 10) || 8);
+    }
+
     function setGlobalBarCount(nextZoom) {
-        var clamped = (typeof Model.clampBarCount === "function") ? Model.clampBarCount(nextZoom) : Math.max(8, parseInt(nextZoom, 10) || 8);
+        var clamped = root.normalizeGlobalZoom(nextZoom);
         if (root.globalBarCount !== clamped) {
             root.globalBarCount = clamped;
         }
     }
 
     function setGlobalBarCountDebounced(nextZoom) {
-        var clamped = (typeof Model.clampBarCount === "function") ? Model.clampBarCount(nextZoom) : Math.max(8, parseInt(nextZoom, 10) || 8);
+        var clamped = root.normalizeGlobalZoom(nextZoom);
         if (clamped !== root.globalBarCount) {
             root.pendingGlobalBarCount = clamped;
             chartZoomDebounceTimer.restart();
@@ -1521,7 +1527,7 @@ FloatingWindow {
                                 anchors.rightMargin: Style.space(4)
                                 horizontalAlignment: TextInput.AlignHCenter
                                 verticalAlignment: TextInput.AlignVCenter
-                                text: "" + root.globalBarCount
+                                text: root.globalBarCount < 0 ? "ALL" : ("" + root.globalBarCount)
                                 color: root.foreground
                                 font.family: root.fontFamily
                                 font.pixelSize: Style.font.caption
@@ -1541,7 +1547,7 @@ FloatingWindow {
                                     if (activeFocus) {
                                         selectAll();
                                     } else {
-                                        barsInput.text = "" + root.globalBarCount;
+                                        barsInput.text = root.globalBarCount < 0 ? "ALL" : ("" + root.globalBarCount);
                                     }
                                 }
 
@@ -1561,7 +1567,7 @@ FloatingWindow {
                             Binding {
                                 target: barsInput
                                 property: "text"
-                                value: "" + root.globalBarCount
+                                value: root.globalBarCount < 0 ? "ALL" : ("" + root.globalBarCount)
                                 when: !barsInput.activeFocus
                             }
 
@@ -1990,9 +1996,9 @@ FloatingWindow {
         interval: 80
         repeat: false
         onTriggered: {
-            if (root.pendingGlobalBarCount >= 8) {
+            if (root.pendingGlobalBarCount !== -2) {
                 root.setGlobalBarCount(root.pendingGlobalBarCount);
-                root.pendingGlobalBarCount = -1;
+                root.pendingGlobalBarCount = -2;
             }
         }
     }

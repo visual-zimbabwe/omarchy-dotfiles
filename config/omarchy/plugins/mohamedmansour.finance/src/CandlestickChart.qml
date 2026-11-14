@@ -720,6 +720,8 @@ Item {
 
         // Check if cursor is hovering over the right price scale gutter or psychological tick levels
         if (root.showPriceScale && px >= g.right) {
+            var prevHoveringScale = hoveringScale;
+            var prevHoveredTick = hoveredTickIndex;
             hoveringScale = true;
             hovering = true;
             hoverIndex = -1;
@@ -748,7 +750,8 @@ Item {
                 hoverPrice = yToPrice(hoverY);
             }
 
-            canvas.requestPaint();
+            if (!prevHoveringScale || prevHoveredTick !== hoveredTickIndex)
+                canvas.requestPaint();
             if (!isSyncing)
                 root.crosshairMoved(-1, hoverPrice, null);
             return;
@@ -1332,11 +1335,18 @@ Item {
                     var isAtLatestBar = (root.dragStartViewStart + root.dragStartViewCount >= total - 1) || root.dragStartRatio >= 0.85;
                     var nextStart = isAtLatestBar ? Math.max(0, total - nextCount) : Math.max(0, Math.min(total - nextCount, Math.round(root.dragStartCenterIndex - nextCount * root.dragStartRatio)));
 
-                    root.viewCount = nextCount >= total ? -1 : nextCount;
-                    root.viewStart = nextCount >= total ? 0 : nextStart;
-                    root.followLatest = (nextCount >= total) || (nextStart >= Math.max(0, total - nextCount));
-                    root.refreshGeometry();
-                    root.zoomChangedManually(root.viewCount);
+                    var targetViewCount = nextCount >= total ? -1 : nextCount;
+                    var targetViewStart = nextCount >= total ? 0 : nextStart;
+                    var targetFollow = (nextCount >= total) || (nextStart >= Math.max(0, total - nextCount));
+                    if (targetViewCount !== root.viewCount || targetViewStart !== root.viewStart || targetFollow !== root.followLatest) {
+                        var zoomChanged = (targetViewCount !== root.viewCount);
+                        root.viewCount = targetViewCount;
+                        root.viewStart = targetViewStart;
+                        root.followLatest = targetFollow;
+                        root.refreshGeometry();
+                        if (zoomChanged)
+                            root.zoomChangedManually(root.viewCount);
+                    }
                 } else if (g.totalCandles > g.vCount) {
                     // Normal Drag = PAN (Move left/right through time)
                     var deltaX = mouse.x - root.dragStartX;
@@ -1455,11 +1465,18 @@ Item {
                     // Zoom OUT: increase visible bar count, expanding symmetrically or outward from right edge
                     var nextCount = Math.min(total, curCount + deltaBars);
                     var nextStart = isAtLatestBar ? Math.max(0, total - nextCount) : Math.max(0, Math.min(total - nextCount, Math.round(anchorBar - ratio * nextCount)));
-                    root.viewCount = nextCount >= total ? -1 : nextCount;
-                    root.viewStart = nextCount >= total ? 0 : nextStart;
-                    root.followLatest = (nextCount >= total) || (nextStart >= Math.max(0, total - nextCount));
-                    root.refreshGeometry();
-                    root.zoomChangedManually(root.viewCount);
+                    var targetViewCount = nextCount >= total ? -1 : nextCount;
+                    var targetViewStart = nextCount >= total ? 0 : nextStart;
+                    var targetFollow = (nextCount >= total) || (nextStart >= Math.max(0, total - nextCount));
+                    if (targetViewCount !== root.viewCount || targetViewStart !== root.viewStart || targetFollow !== root.followLatest) {
+                        var zoomChanged = (targetViewCount !== root.viewCount);
+                        root.viewCount = targetViewCount;
+                        root.viewStart = targetViewStart;
+                        root.followLatest = targetFollow;
+                        root.refreshGeometry();
+                        if (zoomChanged)
+                            root.zoomChangedManually(root.viewCount);
+                    }
                 }
             }
             wheel.accepted = true;

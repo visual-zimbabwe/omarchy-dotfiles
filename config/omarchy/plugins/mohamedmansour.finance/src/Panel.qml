@@ -23,6 +23,7 @@ Panel {
     property int pinIndex: 0
     property var quotes: ({})
     property var chartCache: ({})
+    property var chartCacheAccess: ({})
     property bool candleCacheDirty: false
     signal candleCacheUpdated(string key)
     signal quotesUpdated(var changedSymbols)
@@ -1426,13 +1427,57 @@ Panel {
         }
     }
 
+    function collectProtectedCacheKeys() {
+        var prot = ({});
+        var tfs = ["30", "60", "1D", "1W", "1M"];
+        var wl = root.watchlist || [];
+        for (var i = 0; i < wl.length; i++) {
+            for (var ti = 0; ti < tfs.length; ti++) {
+                prot[Model.cacheKey(wl[i], tfs[ti])] = true;
+            }
+        }
+        var gWins = root.activeGridWindows || [];
+        for (var gi = 0; gi < gWins.length; gi++) {
+            var gw = gWins[gi];
+            if (!gw || !gw.visible)
+                continue;
+            var syms = gw.cellSymbols || [];
+            var gtfs = gw.cellTimeframes || [];
+            for (var ci = 0; ci < syms.length; ci++) {
+                var cs = syms[ci];
+                if (!cs)
+                    continue;
+                if (gtfs[ci])
+                    prot[Model.cacheKey(cs, gtfs[ci])] = true;
+                prot[Model.cacheKey(cs, "60")] = true;
+                prot[Model.cacheKey(cs, "1D")] = true;
+            }
+        }
+        var sWins = root.activeSectorWindows || [];
+        for (var si = 0; si < sWins.length; si++) {
+            var sw = sWins[si];
+            if (!sw || !sw.visible || typeof sw.getAllSymbols !== "function")
+                continue;
+            var sSyms = sw.getAllSymbols() || [];
+            for (var sj = 0; sj < sSyms.length; sj++) {
+                var ss = sSyms[sj];
+                if (!ss)
+                    continue;
+                prot[Model.cacheKey(ss, sw.timeframe)] = true;
+                prot[Model.cacheKey(ss, "1D")] = true;
+                prot[Model.cacheKey(ss, "60")] = true;
+            }
+        }
+        return prot;
+    }
+
     function flushCandleCache() {
         if (!root.candleCacheDirty)
             return;
         root.candleCacheDirty = false;
         try {
-            root.chartCache = Model.pruneChartCache(root.chartCache, 220);
-            candleCacheFile.setText(JSON.stringify(root.chartCache));
+            var diskCache = Model.pruneChartCache(root.chartCache, 600, root.chartCacheAccess, root.collectProtectedCacheKeys());
+            candleCacheFile.setText(JSON.stringify(diskCache));
         } catch (e) {}
     }
 
@@ -1449,6 +1494,7 @@ Panel {
         if (!root.chartCache)
             root.chartCache = ({});
         root.chartCache[key] = candles;
+        root.chartCacheAccess[key] = Date.now();
         root.candleCacheUpdated(key);
         if (quoteEnriched && quoteEnriched.symbol) {
             var existing = root.quotes[quoteEnriched.symbol] || ({});

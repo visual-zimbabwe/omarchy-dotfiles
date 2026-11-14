@@ -26,7 +26,7 @@
     "UVXY"
   ],
   "detailRange": "1M",
-  "gridMode": "2x2",
+  "gridMode": "2+3",
   "gridSync": {
     "symbol": false,
     "timeframe": false,
@@ -35,11 +35,11 @@
     "broadening": false
   },
   "gridSymbols": [
-    "QQQ",
-    "SPY",
     "SMH",
-    "XLK",
-    "QQQ"
+    "SMH",
+    "SMH",
+    "SMH",
+    "SMH"
   ],
   "gridSplits": {
     "2x2": {
@@ -231,16 +231,16 @@
   },
   "gridTimeframes": [
     "30",
-    "30",
-    "30",
-    "30",
+    "60",
+    "1D",
+    "1W",
     "1M"
   ],
   "gridZooms": [
-    23,
-    17,
-    18,
-    20,
+    8,
+    8,
+    8,
+    8,
     8
   ],
   "discordWebhook": "https://discord.com/api/webhooks/1555025989363310644/M0JepOpRsNNPbR_Ykk_-kgxc8plFo2Mfp7j0t_-Y7dv92osFqVITTKc5NcJ_qYA2v_TR",
