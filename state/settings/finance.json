@@ -26,20 +26,20 @@
     "UVXY"
   ],
   "detailRange": "1M",
-  "gridMode": "2+3",
+  "gridMode": "2x2",
   "gridSync": {
-    "broadening": false,
+    "broadening": true,
     "crosshair": false,
     "symbol": false,
     "time": false,
     "timeframe": false
   },
   "gridSymbols": [
-    "DIA",
-    "DIA",
-    "DIA",
-    "DIA",
-    "DIA"
+    "QQQ",
+    "QQQ",
+    "QQQ",
+    "QQQ",
+    "QQQ"
   ],
   "gridSplits": {
     "2x2": {
@@ -97,16 +97,15 @@
           "symbol": "QQQ",
           "workspace": 2,
           "timeframes": [
-            "30",
-            "30",
-            "30",
-            "30",
+            "60",
+            "1D",
+            "1W",
             "1M"
           ],
           "zooms": [
-            23,
-            17,
-            18,
+            95,
+            110,
+            40,
             20,
             8
           ],
@@ -123,7 +122,7 @@
             "1M"
           ],
           "zooms": [
-            16,
+            47,
             8,
             8,
             8,
@@ -230,17 +229,16 @@
     }
   },
   "gridTimeframes": [
-    "30",
     "60",
     "1D",
     "1W",
     "1M"
   ],
   "gridZooms": [
-    16,
-    8,
-    8,
-    8,
+    95,
+    110,
+    40,
+    20,
     8
   ],
   "discordWebhook": "https://discord.com/api/webhooks/1555025989363310644/M0JepOpRsNNPbR_Ykk_-kgxc8plFo2Mfp7j0t_-Y7dv92osFqVITTKc5NcJ_qYA2v_TR",
