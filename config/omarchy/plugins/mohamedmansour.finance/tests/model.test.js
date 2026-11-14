@@ -4501,3 +4501,24 @@ test("WCAG contrast, theme-adaptive dim/semantic colors, and quotedFontFamily", 
   assert.equal(Model.quotedFontFamily("JetBrainsMono Nerd Font"), '"JetBrainsMono Nerd Font"')
   assert.equal(Model.quotedFontFamily("monospace"), "monospace")
 })
+
+test("updateCachedDevelopingCandles updates only matching cached timeframes in-place and pruneChartCache keeps newest entries", () => {
+  const nowDate = new Date("2026-04-10T15:00:00Z")
+  const baseTs = Math.floor(new Date("2026-04-10T13:30:00Z").getTime() / 1000)
+  const cache = {
+    "NVDA_1D": [{ timestamp: baseTs, open: 100, high: 102, low: 99, close: 101, volume: 1000 }],
+    "NVDA_60": [{ timestamp: baseTs, open: 100, high: 102, low: 99, close: 101, volume: 500 }],
+    "OLD_1D": [{ timestamp: 1000, open: 10, high: 11, low: 9, close: 10, volume: 10 }],
+    "MID_1D": [{ timestamp: 2000, open: 20, high: 21, low: 19, close: 20, volume: 10 }]
+  }
+  const changed = Model.updateCachedDevelopingCandles(cache, "NVDA", { price: 105, dayHigh: 105, dayLow: 98 }, ["1D", "60", "1D", "1W"], nowDate)
+  assert.deepEqual(changed, ["NVDA_1D", "NVDA_60"])
+  assert.equal(cache["NVDA_1D"][cache["NVDA_1D"].length - 1].close, 105)
+  assert.equal(cache["NVDA_60"][cache["NVDA_60"].length - 1].close, 105)
+
+  const pruned = Model.pruneChartCache(cache, 2)
+  assert.equal(Object.keys(pruned).length, 2)
+  assert.ok(pruned["NVDA_1D"])
+  assert.ok(pruned["NVDA_60"])
+  assert.equal(pruned["OLD_1D"], undefined)
+})

@@ -175,6 +175,60 @@ FloatingWindow {
         return -1;
     }
 
+    property int cellRev0: 0
+    property int cellRev1: 0
+    property int cellRev2: 0
+    property int cellRev3: 0
+    property int cellRev4: 0
+
+    function cellRev(index) {
+        if (index === 0) return root.cellRev0;
+        if (index === 1) return root.cellRev1;
+        if (index === 2) return root.cellRev2;
+        if (index === 3) return root.cellRev3;
+        if (index === 4) return root.cellRev4;
+        return 0;
+    }
+
+    function bumpCellRev(index) {
+        if (index === 0) root.cellRev0++;
+        else if (index === 1) root.cellRev1++;
+        else if (index === 2) root.cellRev2++;
+        else if (index === 3) root.cellRev3++;
+        else if (index === 4) root.cellRev4++;
+    }
+
+    function notifyCacheKeyUpdated(key) {
+        if (!key) return;
+        var sep = key.lastIndexOf("_");
+        var sym = sep >= 0 ? key.slice(0, sep) : "";
+        var count = root.gridMode === "2x2" ? 4 : 5;
+        for (var i = 0; i < count; i++) {
+            var cSym = root.symbolForCell(i);
+            if (!sym || cSym === sym) {
+                root.bumpCellRev(i);
+            }
+        }
+    }
+
+    function notifyQuotesUpdated(changedSymbols) {
+        if (!Array.isArray(changedSymbols) || changedSymbols.length === 0) return;
+        var count = root.gridMode === "2x2" ? 4 : 5;
+        for (var i = 0; i < count; i++) {
+            var cSym = root.symbolForCell(i);
+            if (changedSymbols.indexOf(cSym) !== -1) {
+                root.bumpCellRev(i);
+            }
+        }
+    }
+
+    Timer {
+        id: saveStateDebounceTimer
+        interval: 400
+        repeat: false
+        onTriggered: root.saveGridState()
+    }
+
     function setZoomForCell(index, newZoom) {
         var updated = [];
         for (var i = 0; i < 5; i++) {
@@ -183,7 +237,7 @@ FloatingWindow {
         }
         updated[index] = (isFinite(newZoom) && newZoom >= 5) ? Math.round(newZoom) : -1;
         root.cellZooms = updated;
-        saveGridState();
+        saveStateDebounceTimer.restart();
     }
 
     function cacheKey(sym, tf) {
@@ -288,17 +342,17 @@ FloatingWindow {
             root.isRetryingYahoo = false;
             if (parsed && parsed.candles) {
                 var key = root.cacheKey(root.currentFetchSymbol, root.currentFetchRange);
-                var nextCache = Object.assign({}, root.chartCache);
-                nextCache[key] = parsed.candles;
-                root.chartCache = nextCache;
+                if (!root.chartCache)
+                    root.chartCache = ({});
+                root.chartCache[key] = parsed.candles;
+                root.notifyCacheKeyUpdated(key);
                 root.chartDataReceived(key, parsed.candles, parsed.symbol ? parsed : null);
 
                 if (parsed.symbol) {
                     var existingQuote = root.quotes[root.currentFetchSymbol];
                     if (!existingQuote) {
-                        var nextQuotes = Object.assign({}, root.quotes);
-                        nextQuotes[root.currentFetchSymbol] = parsed;
-                        root.quotes = nextQuotes;
+                        root.quotes[root.currentFetchSymbol] = parsed;
+                        root.notifyQuotesUpdated([root.currentFetchSymbol]);
                         var singleQuoteMap = ({});
                         singleQuoteMap[root.currentFetchSymbol] = parsed;
                         root.evaluateActivePriceLevelAlerts(singleQuoteMap);
@@ -307,9 +361,8 @@ FloatingWindow {
                         if (parsed.ftfc) enriched.ftfc = parsed.ftfc;
                         if (parsed.bar60) enriched.bar60 = parsed.bar60;
                         if (parsed.closes && (!enriched.closes || enriched.closes.length === 0)) enriched.closes = parsed.closes;
-                        var nextQuotesEnriched = Object.assign({}, root.quotes);
-                        nextQuotesEnriched[root.currentFetchSymbol] = enriched;
-                        root.quotes = nextQuotesEnriched;
+                        root.quotes[root.currentFetchSymbol] = enriched;
+                        root.notifyQuotesUpdated([root.currentFetchSymbol]);
                     }
                 }
                 root.chartFailureCount = 0;
@@ -1035,7 +1088,14 @@ FloatingWindow {
                     anchors.right: parent.right
                     anchors.rightMargin: Style.space(12)
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: Style.space(10)
+                    spacing: Style.space(6)
+
+                    FinanceLoader {
+                        active: root.fetching
+                        color: root.dim
+                        spinnerSize: Style.font.bodySmall
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
 
                     Text {
                         text: "SYNC"
@@ -1043,144 +1103,109 @@ FloatingWindow {
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.bodySmall
                         font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
                     }
 
-                    Text {
-                        textFormat: Text.PlainText
+                    FinanceChipButton {
                         text: "SYM " + (root.syncSymbol ? "[ON]" : "[OFF]")
-                        color: root.syncSymbol ? root.foreground : root.dim
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.bodySmall
-                        font.bold: root.syncSymbol
-
-                        MouseArea {
-                            anchors.fill: parent
-                            anchors.margins: -Style.space(4)
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                root.syncSymbol = !root.syncSymbol;
-                                if (root.syncSymbol) {
-                                    var currentSym = root.symbolForCell(root.activeCellIndex);
-                                    root.mainSymbol = currentSym;
-                                    var nextSymbols = [];
-                                    for (var i = 0; i < 5; i++)
-                                        nextSymbols.push(currentSym);
-                                    root.cellSymbols = nextSymbols;
-                                }
-                                root.refreshQuotes();
-                                root.refreshAllCharts();
-                                root.saveGridState();
+                        checked: root.syncSymbol
+                        foreground: root.foreground
+                        dimColor: root.dim
+                        fontFamily: root.fontFamily
+                        tooltipText: "Sync symbol across all cells"
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: {
+                            root.syncSymbol = !root.syncSymbol;
+                            if (root.syncSymbol) {
+                                var currentSym = root.symbolForCell(root.activeCellIndex);
+                                root.mainSymbol = currentSym;
+                                var nextSymbols = [];
+                                for (var i = 0; i < 5; i++)
+                                    nextSymbols.push(currentSym);
+                                root.cellSymbols = nextSymbols;
                             }
+                            root.refreshQuotes();
+                            root.refreshAllCharts();
+                            root.saveGridState();
                         }
                     }
 
-                    Text {
-                        textFormat: Text.PlainText
+                    FinanceChipButton {
                         text: "TF " + (root.syncTimeframe ? "[ON]" : "[OFF]")
-                        color: root.syncTimeframe ? root.foreground : root.dim
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.bodySmall
-                        font.bold: root.syncTimeframe
-
-                        MouseArea {
-                            anchors.fill: parent
-                            anchors.margins: -Style.space(4)
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                root.syncTimeframe = !root.syncTimeframe;
-                                if (root.syncTimeframe) {
-                                    var currentTf = root.timeframeForCell(root.activeCellIndex);
-                                    var nextTfs = [];
-                                    for (var i = 0; i < 5; i++)
-                                        nextTfs.push(currentTf);
-                                    root.cellTimeframes = nextTfs;
-                                } else {
-                                    root.cellTimeframes = Model.gridTimeframes(root.gridMode === "1x1" ? root.previousGridMode : root.gridMode);
-                                }
-                                root.refreshAllCharts();
-                                root.saveGridState();
+                        checked: root.syncTimeframe
+                        foreground: root.foreground
+                        dimColor: root.dim
+                        fontFamily: root.fontFamily
+                        tooltipText: "Sync timeframe across all cells"
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: {
+                            root.syncTimeframe = !root.syncTimeframe;
+                            if (root.syncTimeframe) {
+                                var currentTf = root.timeframeForCell(root.activeCellIndex);
+                                var nextTfs = [];
+                                for (var i = 0; i < 5; i++)
+                                    nextTfs.push(currentTf);
+                                root.cellTimeframes = nextTfs;
+                            } else {
+                                root.cellTimeframes = Model.gridTimeframes(root.gridMode === "1x1" ? root.previousGridMode : root.gridMode);
                             }
+                            root.refreshAllCharts();
+                            root.saveGridState();
                         }
                     }
 
-                    Text {
-                        textFormat: Text.PlainText
+                    FinanceChipButton {
                         text: "CROSS " + (root.syncCrosshair ? "[ON]" : "[OFF]")
-                        color: root.syncCrosshair ? root.foreground : root.dim
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.bodySmall
-                        font.bold: root.syncCrosshair
-
-                        MouseArea {
-                            anchors.fill: parent
-                            anchors.margins: -Style.space(4)
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                root.syncCrosshair = !root.syncCrosshair;
-                                root.saveGridState();
-                            }
+                        checked: root.syncCrosshair
+                        foreground: root.foreground
+                        dimColor: root.dim
+                        fontFamily: root.fontFamily
+                        tooltipText: "Sync crosshair across all cells"
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: {
+                            root.syncCrosshair = !root.syncCrosshair;
+                            root.saveGridState();
                         }
                     }
 
-                    Text {
-                        textFormat: Text.PlainText
+                    FinanceChipButton {
                         text: "TIME " + (root.syncTime ? "[ON]" : "[OFF]")
-                        color: root.syncTime ? root.foreground : root.dim
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.bodySmall
-                        font.bold: root.syncTime
-
-                        MouseArea {
-                            anchors.fill: parent
-                            anchors.margins: -Style.space(4)
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                root.syncTime = !root.syncTime;
-                                root.saveGridState();
-                            }
+                        checked: root.syncTime
+                        foreground: root.foreground
+                        dimColor: root.dim
+                        fontFamily: root.fontFamily
+                        tooltipText: "Sync time scroll across all cells"
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: {
+                            root.syncTime = !root.syncTime;
+                            root.saveGridState();
                         }
                     }
 
-                    Text {
-                        textFormat: Text.PlainText
+                    FinanceChipButton {
                         text: "BF " + (root.showBroadening ? "[ON]" : "[OFF]")
-                        color: root.showBroadening ? root.foreground : root.dim
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.bodySmall
-                        font.bold: root.showBroadening
-
-                        MouseArea {
-                            anchors.fill: parent
-                            anchors.margins: -Style.space(4)
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                root.showBroadening = !root.showBroadening;
-                                root.saveGridState();
-                            }
+                        checked: root.showBroadening
+                        foreground: root.foreground
+                        dimColor: root.dim
+                        fontFamily: root.fontFamily
+                        tooltipText: "Toggle Broadening Formation lines"
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: {
+                            root.showBroadening = !root.showBroadening;
+                            root.saveGridState();
                         }
                     }
 
-                    Text {
+                    FinanceChipButton {
                         id: alertsMuteToggle
-                        textFormat: Text.PlainText
                         text: "ALERTS " + (root.alertsMuted ? "[MUTED]" : "[ON]")
-                        color: root.alertsMuted ? Color.urgent : root.foreground
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.bodySmall
-                        font.bold: true
-
-                        MouseArea {
-                            id: alertsMuteMouse
-                            anchors.fill: parent
-                            anchors.margins: -Style.space(4)
-                            cursorShape: Qt.PointingHandCursor
-                            hoverEnabled: true
-                            onClicked: root.alertsMuteToggleRequested()
-                        }
-
-                        QQC.ToolTip.visible: alertsMuteMouse.containsMouse
-                        QQC.ToolTip.delay: 400
-                        QQC.ToolTip.text: root.alertsMuted ? (root.alertsMuteStatus + " · click to unmute") : "Click to mute alerts until the next market open"
+                        checked: true
+                        foreground: root.alertsMuted ? Color.urgent : root.foreground
+                        accentColor: root.alertsMuted ? Color.urgent : Color.accent
+                        fontFamily: root.fontFamily
+                        tooltipText: root.alertsMuted ? (root.alertsMuteStatus + " · click to unmute") : "Click to mute alerts until the next market open"
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: root.alertsMuteToggleRequested()
                     }
                 }
             }
@@ -1213,10 +1238,10 @@ FloatingWindow {
                         symbol: root.symbolForCell(root.activeCellIndex)
                         timeframe: root.timeframeForCell(root.activeCellIndex)
                         zoomCount: root.zoomForCell(root.activeCellIndex)
-                        quote: root.getQuote(symbol)
-                        candles: root.getCandles(symbol, timeframe)
-                        hourlyCandles: root.getCandles(symbol, "60")
-                        dailyCandles: root.getCandles(symbol, "1D")
+                        quote: root.getQuote(symbol, root.cellRev(cellIndex))
+                        candles: root.getCandles(symbol, timeframe, root.cellRev(cellIndex))
+                        hourlyCandles: root.getCandles(symbol, "60", root.cellRev(cellIndex))
+                        dailyCandles: root.getCandles(symbol, "1D", root.cellRev(cellIndex))
                         priceLevels: root.symbolLevels[symbol] || []
                         replayCutoffTs: root.replayCutoffTs
                         activeFocusCell: true
@@ -1277,10 +1302,10 @@ FloatingWindow {
                             symbol: root.symbolForCell(0)
                             timeframe: root.timeframeForCell(0)
                             zoomCount: root.zoomForCell(0)
-                            quote: root.getQuote(symbol)
-                            candles: root.getCandles(symbol, timeframe)
-                            hourlyCandles: root.getCandles(symbol, "60")
-                            dailyCandles: root.getCandles(symbol, "1D")
+                            quote: root.getQuote(symbol, root.cellRev(cellIndex))
+                            candles: root.getCandles(symbol, timeframe, root.cellRev(cellIndex))
+                            hourlyCandles: root.getCandles(symbol, "60", root.cellRev(cellIndex))
+                            dailyCandles: root.getCandles(symbol, "1D", root.cellRev(cellIndex))
                             priceLevels: root.symbolLevels[symbol] || []
                             replayCutoffTs: root.replayCutoffTs
                             activeFocusCell: root.activeCellIndex === 0
@@ -1344,10 +1369,10 @@ FloatingWindow {
                             symbol: root.symbolForCell(1)
                             timeframe: root.timeframeForCell(1)
                             zoomCount: root.zoomForCell(1)
-                            quote: root.getQuote(symbol)
-                            candles: root.getCandles(symbol, timeframe)
-                            hourlyCandles: root.getCandles(symbol, "60")
-                            dailyCandles: root.getCandles(symbol, "1D")
+                            quote: root.getQuote(symbol, root.cellRev(cellIndex))
+                            candles: root.getCandles(symbol, timeframe, root.cellRev(cellIndex))
+                            hourlyCandles: root.getCandles(symbol, "60", root.cellRev(cellIndex))
+                            dailyCandles: root.getCandles(symbol, "1D", root.cellRev(cellIndex))
                             priceLevels: root.symbolLevels[symbol] || []
                             replayCutoffTs: root.replayCutoffTs
                             activeFocusCell: root.activeCellIndex === 1
@@ -1429,10 +1454,10 @@ FloatingWindow {
                                 symbol: root.symbolForCell(2)
                                 timeframe: root.timeframeForCell(2)
                                 zoomCount: root.zoomForCell(2)
-                                quote: root.getQuote(symbol)
-                                candles: root.getCandles(symbol, timeframe)
-                                hourlyCandles: root.getCandles(symbol, "60")
-                                dailyCandles: root.getCandles(symbol, "1D")
+                                quote: root.getQuote(symbol, root.cellRev(cellIndex))
+                                candles: root.getCandles(symbol, timeframe, root.cellRev(cellIndex))
+                                hourlyCandles: root.getCandles(symbol, "60", root.cellRev(cellIndex))
+                                dailyCandles: root.getCandles(symbol, "1D", root.cellRev(cellIndex))
                                 priceLevels: root.symbolLevels[symbol] || []
                                 replayCutoffTs: root.replayCutoffTs
                                 activeFocusCell: root.activeCellIndex === 2
@@ -1496,10 +1521,10 @@ FloatingWindow {
                                 symbol: root.symbolForCell(3)
                                 timeframe: root.timeframeForCell(3)
                                 zoomCount: root.zoomForCell(3)
-                                quote: root.getQuote(symbol)
-                                candles: root.getCandles(symbol, timeframe)
-                                hourlyCandles: root.getCandles(symbol, "60")
-                                dailyCandles: root.getCandles(symbol, "1D")
+                                quote: root.getQuote(symbol, root.cellRev(cellIndex))
+                                candles: root.getCandles(symbol, timeframe, root.cellRev(cellIndex))
+                                hourlyCandles: root.getCandles(symbol, "60", root.cellRev(cellIndex))
+                                dailyCandles: root.getCandles(symbol, "1D", root.cellRev(cellIndex))
                                 priceLevels: root.symbolLevels[symbol] || []
                                 replayCutoffTs: root.replayCutoffTs
                                 activeFocusCell: root.activeCellIndex === 3
@@ -1559,10 +1584,10 @@ FloatingWindow {
                                 symbol: root.symbolForCell(2)
                                 timeframe: root.timeframeForCell(2)
                                 zoomCount: root.zoomForCell(2)
-                                quote: root.getQuote(symbol)
-                                candles: root.getCandles(symbol, timeframe)
-                                hourlyCandles: root.getCandles(symbol, "60")
-                                dailyCandles: root.getCandles(symbol, "1D")
+                                quote: root.getQuote(symbol, root.cellRev(cellIndex))
+                                candles: root.getCandles(symbol, timeframe, root.cellRev(cellIndex))
+                                hourlyCandles: root.getCandles(symbol, "60", root.cellRev(cellIndex))
+                                dailyCandles: root.getCandles(symbol, "1D", root.cellRev(cellIndex))
                                 priceLevels: root.symbolLevels[symbol] || []
                                 replayCutoffTs: root.replayCutoffTs
                                 activeFocusCell: root.activeCellIndex === 2
@@ -1626,10 +1651,10 @@ FloatingWindow {
                                 symbol: root.symbolForCell(3)
                                 timeframe: root.timeframeForCell(3)
                                 zoomCount: root.zoomForCell(3)
-                                quote: root.getQuote(symbol)
-                                candles: root.getCandles(symbol, timeframe)
-                                hourlyCandles: root.getCandles(symbol, "60")
-                                dailyCandles: root.getCandles(symbol, "1D")
+                                quote: root.getQuote(symbol, root.cellRev(cellIndex))
+                                candles: root.getCandles(symbol, timeframe, root.cellRev(cellIndex))
+                                hourlyCandles: root.getCandles(symbol, "60", root.cellRev(cellIndex))
+                                dailyCandles: root.getCandles(symbol, "1D", root.cellRev(cellIndex))
                                 priceLevels: root.symbolLevels[symbol] || []
                                 replayCutoffTs: root.replayCutoffTs
                                 activeFocusCell: root.activeCellIndex === 3
@@ -1693,10 +1718,10 @@ FloatingWindow {
                                 symbol: root.symbolForCell(4)
                                 timeframe: root.timeframeForCell(4)
                                 zoomCount: root.zoomForCell(4)
-                                quote: root.getQuote(symbol)
-                                candles: root.getCandles(symbol, timeframe)
-                                hourlyCandles: root.getCandles(symbol, "60")
-                                dailyCandles: root.getCandles(symbol, "1D")
+                                quote: root.getQuote(symbol, root.cellRev(cellIndex))
+                                candles: root.getCandles(symbol, timeframe, root.cellRev(cellIndex))
+                                hourlyCandles: root.getCandles(symbol, "60", root.cellRev(cellIndex))
+                                dailyCandles: root.getCandles(symbol, "1D", root.cellRev(cellIndex))
                                 priceLevels: root.symbolLevels[symbol] || []
                                 replayCutoffTs: root.replayCutoffTs
                                 activeFocusCell: root.activeCellIndex === 4

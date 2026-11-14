@@ -7578,8 +7578,10 @@ function isLightColor(color) {
 
 function accessibleSemanticColor(tone, bgColor) {
   var lightBg = isLightColor(bgColor);
-  if (tone === "up") return lightBg ? "#136f3a" : "#4ade80";
-  if (tone === "down") return lightBg ? "#b91c1c" : "#f87171";
+  if (tone === "up" || tone === "success") return lightBg ? "#136f3a" : "#4ade80";
+  if (tone === "down" || tone === "error") return lightBg ? "#b91c1c" : "#f87171";
+  if (tone === "warning") return lightBg ? "#92400e" : "#fbbf24";
+  if (tone === "info") return lightBg ? "#1d4ed8" : "#60a5fa";
   return lightBg ? "#475569" : "#94a3b8";
 }
 
@@ -7614,6 +7616,55 @@ function quotedFontFamily(family) {
     return '"' + f.replace(/"/g, "") + '"';
   }
   return f;
+}
+
+function updateCachedDevelopingCandles(cache, sym, quote, timeframes, nowDate) {
+  if (!cache || !sym || !quote || !Array.isArray(timeframes)) return [];
+  var changedKeys = [];
+  var seen = {};
+  var tsNow = nowDate || new Date();
+  for (var i = 0; i < timeframes.length; i++) {
+    var tf = timeframes[i];
+    if (!tf || seen[tf]) continue;
+    seen[tf] = true;
+    var k = cacheKey(sym, tf);
+    var existing = cache[k];
+    if (existing && existing.length > 0) {
+      var updated = updateDevelopingCandle(existing, quote, tf, tsNow);
+      if (updated !== existing) {
+        cache[k] = updated;
+        changedKeys.push(k);
+      }
+    }
+  }
+  return changedKeys;
+}
+
+function pruneChartCache(cache, maxEntries) {
+  if (!cache || typeof cache !== "object") return {};
+  var cap = (isFinite(maxEntries) && maxEntries > 0) ? Math.floor(maxEntries) : 220;
+  var keys = Object.keys(cache);
+  if (keys.length <= cap) return cache;
+
+  var ranked = [];
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    var list = cache[k];
+    var lastTs = 0;
+    if (Array.isArray(list) && list.length > 0) {
+      var last = list[list.length - 1];
+      if (last && isFinite(last.timestamp)) lastTs = last.timestamp;
+    }
+    ranked.push({ key: k, ts: lastTs });
+  }
+  ranked.sort(function (a, b) { return b.ts - a.ts; });
+
+  var pruned = {};
+  for (var j = 0; j < cap && j < ranked.length; j++) {
+    var rk = ranked[j].key;
+    pruned[rk] = cache[rk];
+  }
+  return pruned;
 }
 
 var Z_LAYER = {
@@ -7791,6 +7842,8 @@ if (typeof module !== "undefined") {
     isBasketSector: isBasketSector,
     chunkSymbols: chunkSymbols,
     updateDevelopingCandle: updateDevelopingCandle,
+    updateCachedDevelopingCandles: updateCachedDevelopingCandles,
+    pruneChartCache: pruneChartCache,
     SIMULTANEOUS_BREAK_THRESHOLD: SIMULTANEOUS_BREAK_THRESHOLD,
     stratSpread: stratSpread,
     MIN_BAR_COUNT: MIN_BAR_COUNT,

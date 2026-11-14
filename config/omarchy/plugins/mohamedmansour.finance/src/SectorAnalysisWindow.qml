@@ -60,6 +60,43 @@ FloatingWindow {
     signal symbolLevelsChangedExternally(string sym, var nextLevels)
     signal quotesReceived(var incomingQuotes)
     signal chartDataReceived(string key, var candles, var quoteEnriched)
+    signal symbolDataUpdated(string sym)
+    property int drillDownDataRev: 0
+
+    function notifyCacheKeyUpdated(key) {
+        if (!key)
+            return;
+        var sep = key.lastIndexOf("_");
+        var sym = sep >= 0 ? key.slice(0, sep) : "";
+        if (sym) {
+            root.symbolDataUpdated(sym);
+            if (root.inDrillDown && sym === root.drillDownSymbol)
+                root.drillDownDataRev++;
+        } else {
+            root.symbolDataUpdated("");
+            if (root.inDrillDown)
+                root.drillDownDataRev++;
+        }
+        breadthUpdateTimer.restart();
+        if ((root.scenarioFilter || "").trim() !== "" || root.sortField !== "weight")
+            tileModelSyncTimer.restart();
+    }
+
+    function notifyQuotesUpdated(changedSymbols) {
+        if (!Array.isArray(changedSymbols) || changedSymbols.length === 0)
+            return;
+        for (var i = 0; i < changedSymbols.length; i++) {
+            var s = changedSymbols[i];
+            if (s) {
+                root.symbolDataUpdated(s);
+                if (root.inDrillDown && s === root.drillDownSymbol)
+                    root.drillDownDataRev++;
+            }
+        }
+        breadthUpdateTimer.restart();
+        if ((root.scenarioFilter || "").trim() !== "" || root.sortField !== "weight")
+            tileModelSyncTimer.restart();
+    }
 
     title: {
         var t = root.sectorTickers;
@@ -87,6 +124,8 @@ FloatingWindow {
         } else {
             root.holdingsFetchSymbol = "";
             root.holdings = [];
+            syncTileModel();
+            recomputeBreadthMetrics();
             refreshBatchQuotes();
             refreshVisibleCharts(false);
         }
@@ -175,11 +214,14 @@ FloatingWindow {
     }
 
     onTimeframeChanged: {
+        syncTileModel();
+        recomputeBreadthMetrics();
         refreshVisibleCharts(true);
     }
 
     onScenarioFilterChanged: {
         root.activeTileIndex = 0;
+        syncTileModel();
     }
 
     function toggleSector() {
@@ -271,8 +313,10 @@ FloatingWindow {
         }
     }
 
-    // Breadth Attack Metrics Calculation (Equal-Weighted, exactly matching Model.computeBasketAttackMetrics)
-    readonly property var breadthMetrics: {
+    // Breadth Attack Metrics Calculation (Equal-Weighted, throttled via breadthUpdateTimer)
+    property var breadthMetrics: null
+
+    function recomputeBreadthMetrics() {
         var dailyCandlesMap = {};
         var targetHoldings = [];
         var labelSym = root.sectorSymbol;
@@ -296,11 +340,30 @@ FloatingWindow {
             }
             targetHoldings = root.holdings;
         }
-        return Model.computeBasketAttackMetrics(labelSym, labelName, "Sector", targetHoldings, dailyCandlesMap, root.quotes, root.timeframe);
+        root.breadthMetrics = Model.computeBasketAttackMetrics(labelSym, labelName, "Sector", targetHoldings, dailyCandlesMap, root.quotes, root.timeframe);
     }
 
-    // Filter and Sort Engine (Evaluates against active locked sub-universe if active)
-    readonly property var filteredTiles: {
+    Timer {
+        id: breadthUpdateTimer
+        interval: 150
+        repeat: false
+        onTriggered: root.recomputeBreadthMetrics()
+    }
+
+    Timer {
+        id: tileModelSyncTimer
+        interval: 220
+        repeat: false
+        onTriggered: root.syncTileModel()
+    }
+
+    ListModel {
+        id: tileListModel
+    }
+
+    property var filteredTiles: []
+
+    function computeFilteredTiles() {
         var list = [];
         var filterQuery = (root.scenarioFilter || "").trim();
         var lockedSyms = root.activeLockedSymbols;
@@ -389,6 +452,79 @@ FloatingWindow {
         return list;
     }
 
+    function syncTileModel() {
+        var nextList = root.computeFilteredTiles();
+        root.filteredTiles = nextList;
+
+        // Fast path: if exact same symbols in same order, only update metadata in-place (zero delegate churn)
+        if (tileListModel.count === nextList.length) {
+            var sameOrder = true;
+            for (var k = 0; k < nextList.length; k++) {
+                if (tileListModel.get(k).symbol !== nextList[k].symbol) {
+                    sameOrder = false;
+                    break;
+                }
+            }
+            if (sameOrder) {
+                for (var u = 0; u < nextList.length; u++) {
+                    var itemU = nextList[u];
+                    var rowU = tileListModel.get(u);
+                    var nextName = itemU.name || "";
+                    if (rowU.name !== nextName)
+                        tileListModel.setProperty(u, "name", nextName);
+                }
+                return;
+            }
+        }
+
+        // Incremental diff by symbol so surviving tiles keep their GridCell & Canvas instances
+        var wanted = ({});
+        for (var w = 0; w < nextList.length; w++) {
+            wanted[nextList[w].symbol] = true;
+        }
+        for (var r = tileListModel.count - 1; r >= 0; r--) {
+            if (!wanted[tileListModel.get(r).symbol])
+                tileListModel.remove(r);
+        }
+        for (var idx = 0; idx < nextList.length; idx++) {
+            var target = nextList[idx];
+            var foundIdx = -1;
+            for (var s = idx; s < tileListModel.count; s++) {
+                if (tileListModel.get(s).symbol === target.symbol) {
+                    foundIdx = s;
+                    break;
+                }
+            }
+            var rowObj = {
+                symbol: target.symbol,
+                name: target.name || "",
+                isEtf: !!target.isEtf,
+                pctVal: Number(target.pctVal) || 0,
+                valUSD: Number(target.valUSD) || 0
+            };
+            if (foundIdx === idx) {
+                var cur = tileListModel.get(idx);
+                if (cur.name !== rowObj.name)
+                    tileListModel.setProperty(idx, "name", rowObj.name);
+            } else if (foundIdx > idx) {
+                tileListModel.move(foundIdx, idx, 1);
+                var moved = tileListModel.get(idx);
+                if (moved.name !== rowObj.name)
+                    tileListModel.setProperty(idx, "name", rowObj.name);
+            } else {
+                tileListModel.insert(idx, rowObj);
+            }
+        }
+    }
+
+    onHoldingsChanged: {
+        syncTileModel();
+        recomputeBreadthMetrics();
+    }
+    onSortFieldChanged: syncTileModel()
+    onSortAscendingChanged: syncTileModel()
+    onActiveLockedSymbolsChanged: syncTileModel()
+
     readonly property int totalHoldingsCount: {
         if (root.isMultiTicker) {
             return root.sectorTickers.length;
@@ -451,43 +587,23 @@ FloatingWindow {
                 try {
                     var parsed = Model.parseSpark(raw);
                     if (parsed && typeof parsed === "object") {
-                        root.quotes = Model.mergeQuotes(root.quotes, parsed);
-                        root.quotesReceived(parsed);
-                        var nextCache = Object.assign({}, root.chartCache);
                         var keys = Object.keys(parsed);
+                        for (var qi = 0; qi < keys.length; qi++) {
+                            var qs = keys[qi];
+                            var existingQ = root.quotes[qs];
+                            root.quotes[qs] = existingQ ? Object.assign({}, existingQ, parsed[qs]) : parsed[qs];
+                        }
+                        root.quotesReceived(parsed);
+                        if (!root.chartCache)
+                            root.chartCache = ({});
                         var nowDate = new Date();
-                        var cacheModified = false;
+                        var tfs = [root.timeframe, "1D", "60"];
                         for (var ki = 0; ki < keys.length; ki++) {
                             var s = keys[ki];
                             var q = parsed[s];
-                            var kActive = root.cacheKey(s, root.timeframe);
-                            if (nextCache[kActive] && nextCache[kActive].length > 0) {
-                                var updatedActive = Model.updateDevelopingCandle(nextCache[kActive], q, root.timeframe, nowDate);
-                                if (updatedActive !== nextCache[kActive]) {
-                                    nextCache[kActive] = updatedActive;
-                                    cacheModified = true;
-                                }
-                            }
-                            var k1D = root.cacheKey(s, "1D");
-                            if (root.timeframe !== "1D" && nextCache[k1D] && nextCache[k1D].length > 0) {
-                                var updated1D = Model.updateDevelopingCandle(nextCache[k1D], q, "1D", nowDate);
-                                if (updated1D !== nextCache[k1D]) {
-                                    nextCache[k1D] = updated1D;
-                                    cacheModified = true;
-                                }
-                            }
-                            var k60 = root.cacheKey(s, "60");
-                            if (root.timeframe !== "60" && nextCache[k60] && nextCache[k60].length > 0) {
-                                var updated60 = Model.updateDevelopingCandle(nextCache[k60], q, "60", nowDate);
-                                if (updated60 !== nextCache[k60]) {
-                                    nextCache[k60] = updated60;
-                                    cacheModified = true;
-                                }
-                            }
+                            Model.updateCachedDevelopingCandles(root.chartCache, s, q, tfs, nowDate);
                         }
-                        if (cacheModified) {
-                            root.chartCache = nextCache;
-                        }
+                        root.notifyQuotesUpdated(keys);
                     }
                 } catch (e) {
                     console.log("[SectorAnalysis] Error parsing spark quotes:", e);
@@ -566,18 +682,18 @@ FloatingWindow {
                 var parsed = Model.parseChart(raw, tf, sym);
                 if (parsed && Array.isArray(parsed.candles) && parsed.candles.length > 0) {
                     var k = root.cacheKey(sym, tf);
-                    var nextCache = Object.assign({}, root.chartCache);
-                    nextCache[k] = parsed.candles;
-                    root.chartCache = nextCache;
+                    if (!root.chartCache)
+                        root.chartCache = ({});
+                    root.chartCache[k] = parsed.candles;
+                    root.notifyCacheKeyUpdated(k);
                     root.chartDataReceived(k, parsed.candles, parsed.symbol ? parsed : null);
 
                     if (parsed.symbol && !root.quotes[sym]) {
-                        var nextQuotes = Object.assign({}, root.quotes);
-                        nextQuotes[sym] = parsed;
-                        root.quotes = nextQuotes;
+                        root.quotes[sym] = parsed;
                         var singleMap = ({});
                         singleMap[sym] = parsed;
                         root.quotesReceived(singleMap);
+                        root.notifyQuotesUpdated([sym]);
                     }
                 }
             } catch (e) {
@@ -701,15 +817,15 @@ FloatingWindow {
         for (var i = 0; i < syms.length; i++) {
             queueFetch(syms[i], root.timeframe, force);
         }
-        // 2. Priority 2: 1D and 60m for breadth calculations
+        // 2. Priority 2: 1D and 60m for breadth calculations (only if not already cached)
         if (root.timeframe !== "1D") {
             for (var j = 0; j < syms.length; j++) {
-                queueFetch(syms[j], "1D", force);
+                queueFetch(syms[j], "1D", false);
             }
         }
         if (root.timeframe !== "60") {
             for (var k = 0; k < syms.length; k++) {
-                queueFetch(syms[k], "60", force);
+                queueFetch(syms[k], "60", false);
             }
         }
     }
@@ -1104,13 +1220,20 @@ FloatingWindow {
                                     font.pixelSize: Style.font.caption
                                     selectByMouse: true
 
+                                    onTextChanged: {
+                                        if (activeFocus)
+                                            scenarioDebounceTimer.restart();
+                                    }
+
                                     onAccepted: {
+                                        scenarioDebounceTimer.stop();
                                         root.scenarioFilter = text.trim();
                                         keyboardListener.forceActiveFocus();
                                     }
 
                                     onActiveFocusChanged: {
                                         if (!activeFocus) {
+                                            scenarioDebounceTimer.stop();
                                             root.scenarioFilter = text.trim();
                                         } else {
                                             selectAll();
@@ -1335,53 +1458,24 @@ FloatingWindow {
                         }
 
                         // Copy Filtered Tickers Button
-                        FinanceSurface {
+                        FinanceChipButton {
                             id: copyBtn
-                            elevation: 0
-                            radiusToken: "sm"
-                            sheen: false
-                            active: copyFeedbackTimer.running
-                            foregroundColor: root.foreground
-                            surfaceColor: copyFeedbackTimer.running ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.16) : (copyHover.hovered ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14) : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08))
-                            height: Style.space(24)
-                            implicitWidth: copyRow.implicitWidth + Style.space(16)
-                            opacity: root.filteredTiles.length === 0 ? 0.4 : 1.0
+                            bordered: true
+                            enabled: root.filteredTiles.length > 0
+                            checked: copyFeedbackTimer.running
+                            iconText: copyFeedbackTimer.running ? "✓" : "\uf0c5"
+                            text: copyFeedbackTimer.running ? "COPIED" : "COPY"
+                            foreground: copyFeedbackTimer.running ? Color.accent : root.foreground
+                            dimColor: root.dim
+                            accentColor: Color.accent
+                            fontFamily: root.fontFamily
+                            fontSize: Style.font.caption
+                            horizontalPadding: Style.space(8)
+                            verticalPadding: Style.space(3)
+                            cornerRadius: Style.space(4)
+                            tooltipText: "Copy filtered tickers to clipboard"
                             anchors.verticalCenter: parent.verticalCenter
-
-                            Row {
-                                id: copyRow
-                                anchors.centerIn: parent
-                                spacing: Style.space(4)
-
-                                Text {
-                                    textFormat: Text.PlainText
-                                    text: copyFeedbackTimer.running ? "✓" : "\uf0c5"
-                                    color: copyFeedbackTimer.running ? Color.accent : (root.filteredTiles.length === 0 ? root.dim : root.foreground)
-                                    font.family: root.fontFamily
-                                    font.pixelSize: Style.font.caption
-                                    font.bold: true
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-
-                                Text {
-                                    textFormat: Text.PlainText
-                                    text: copyFeedbackTimer.running ? "COPIED" : "COPY"
-                                    color: copyFeedbackTimer.running ? Color.accent : (root.filteredTiles.length === 0 ? root.dim : root.foreground)
-                                    font.family: root.fontFamily
-                                    font.pixelSize: Style.font.caption
-                                    font.bold: true
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                            }
-
-                            MouseArea {
-                                id: copyHover
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                enabled: root.filteredTiles.length > 0
-                                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                onClicked: root.copyFilteredTickers()
-                            }
+                            onClicked: root.copyFilteredTickers()
                         }
                     }
 
@@ -1403,12 +1497,19 @@ FloatingWindow {
 
                         FinanceSurface {
                             id: barsBox
+                            readonly property int parsedBars: parseInt(barsInput.text, 10)
+                            readonly property bool barsOutOfRange: barsInput.activeFocus && barsInput.text.length > 0 && (isNaN(parsedBars) || parsedBars < Model.MIN_BAR_COUNT || parsedBars > Model.MAX_BAR_COUNT)
+
                             elevation: 0
                             radiusToken: "sm"
                             sheen: false
                             active: barsInput.activeFocus
                             foregroundColor: root.foreground
+                            borderColorOverride: barsOutOfRange ? Color.urgent : "transparent"
                             surfaceColor: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+
+                            QQC.ToolTip.visible: barsBox.barsOutOfRange
+                            QQC.ToolTip.text: "Bars clamped to " + Model.MIN_BAR_COUNT + "–" + Model.MAX_BAR_COUNT
                             width: Style.space(48)
                             height: Style.space(24)
                             anchors.verticalCenter: parent.verticalCenter
@@ -1498,176 +1599,51 @@ FloatingWindow {
                             anchors.verticalCenter: parent.verticalCenter
                         }
 
-                        // 2u Metric
-                        Row {
-                            spacing: Style.space(3)
-                            anchors.verticalCenter: parent.verticalCenter
+                        Repeater {
+                            model: [
+                                { label: "2u", pct: root.breadthMetrics.pct2u, count: root.breadthMetrics.count2u, valColor: root.breadthMetrics.isSimultaneous2u ? root.upColor : root.foreground },
+                                { label: "2d", pct: root.breadthMetrics.pct2d, count: root.breadthMetrics.count2d, valColor: root.breadthMetrics.isSimultaneous2d ? root.downColor : root.foreground },
+                                { label: "1", pct: root.breadthMetrics.pct1 || 0, count: root.breadthMetrics.count1 || 0, valColor: root.foreground },
+                                { label: "3", pct: root.breadthMetrics.pct3 || 0, count: root.breadthMetrics.count3 || 0, valColor: root.foreground },
+                                { label: "2u Red", pct: root.breadthMetrics.pctF2u || 0, count: root.breadthMetrics.countF2u || 0, valColor: (root.breadthMetrics.pctF2u || 0) >= 20 ? root.downColor : root.foreground },
+                                { label: "2d Green", pct: root.breadthMetrics.pctF2d || 0, count: root.breadthMetrics.countF2d || 0, valColor: (root.breadthMetrics.pctF2d || 0) >= 20 ? root.upColor : root.foreground }
+                            ]
 
-                            Text {
-                                textFormat: Text.PlainText
-                                text: "2u: " + Math.round(root.breadthMetrics.pct2u) + "%"
-                                color: root.breadthMetrics.isSimultaneous2u ? root.upColor : root.foreground
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
-                                font.bold: true
-                            }
+                            Row {
+                                required property var modelData
+                                required property int index
+                                spacing: Style.space(8)
+                                anchors.verticalCenter: parent.verticalCenter
 
-                            Text {
-                                textFormat: Text.PlainText
-                                text: root.breadthMetrics.count2u + "/" + root.breadthMetrics.totalHoldings
-                                color: root.dim
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
-                            }
-                        }
+                                Text {
+                                    visible: parent.index > 0
+                                    textFormat: Text.PlainText
+                                    text: "|"
+                                    color: Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.3)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
 
-                        Text {
-                            textFormat: Text.PlainText
-                            text: "|"
-                            color: Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.3)
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
+                                Row {
+                                    spacing: Style.space(3)
+                                    anchors.verticalCenter: parent.verticalCenter
 
-                        // 2d Metric
-                        Row {
-                            spacing: Style.space(3)
-                            anchors.verticalCenter: parent.verticalCenter
+                                    Text {
+                                        textFormat: Text.PlainText
+                                        text: modelData.label + ": " + Math.round(modelData.pct) + "%"
+                                        color: modelData.valColor
+                                        font.family: root.fontFamily
+                                        font.pixelSize: Style.font.caption
+                                        font.bold: true
+                                    }
 
-                            Text {
-                                textFormat: Text.PlainText
-                                text: "2d: " + Math.round(root.breadthMetrics.pct2d) + "%"
-                                color: root.breadthMetrics.isSimultaneous2d ? root.downColor : root.foreground
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
-                                font.bold: true
-                            }
-
-                            Text {
-                                textFormat: Text.PlainText
-                                text: root.breadthMetrics.count2d + "/" + root.breadthMetrics.totalHoldings
-                                color: root.dim
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
-                            }
-                        }
-
-                        Text {
-                            textFormat: Text.PlainText
-                            text: "|"
-                            color: Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.3)
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-
-                        // 1 Metric (Inside Bar)
-                        Row {
-                            spacing: Style.space(3)
-                            anchors.verticalCenter: parent.verticalCenter
-
-                            Text {
-                                textFormat: Text.PlainText
-                                text: "1: " + Math.round(root.breadthMetrics.pct1 || 0) + "%"
-                                color: root.foreground
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
-                                font.bold: true
-                            }
-
-                            Text {
-                                textFormat: Text.PlainText
-                                text: (root.breadthMetrics.count1 || 0) + "/" + root.breadthMetrics.totalHoldings
-                                color: root.dim
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
-                            }
-                        }
-
-                        Text {
-                            textFormat: Text.PlainText
-                            text: "|"
-                            color: Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.3)
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-
-                        // 3 Metric (Outside Bar)
-                        Row {
-                            spacing: Style.space(3)
-                            anchors.verticalCenter: parent.verticalCenter
-
-                            Text {
-                                textFormat: Text.PlainText
-                                text: "3: " + Math.round(root.breadthMetrics.pct3 || 0) + "%"
-                                color: root.foreground
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
-                                font.bold: true
-                            }
-
-                            Text {
-                                textFormat: Text.PlainText
-                                text: (root.breadthMetrics.count3 || 0) + "/" + root.breadthMetrics.totalHoldings
-                                color: root.dim
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
-                            }
-                        }
-
-                        Text {
-                            textFormat: Text.PlainText
-                            text: "|"
-                            color: Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.3)
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-
-                        // 2u Red Metric (Failed 2u Reversal / Bearish Evidence)
-                        Row {
-                            spacing: Style.space(3)
-                            anchors.verticalCenter: parent.verticalCenter
-
-                            Text {
-                                textFormat: Text.PlainText
-                                text: "2u Red: " + Math.round(root.breadthMetrics.pctF2u || 0) + "%"
-                                color: (root.breadthMetrics.pctF2u || 0) >= 20 ? root.downColor : root.foreground
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
-                                font.bold: true
-                            }
-
-                            Text {
-                                textFormat: Text.PlainText
-                                text: (root.breadthMetrics.countF2u || 0) + "/" + root.breadthMetrics.totalHoldings
-                                color: root.dim
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
-                            }
-                        }
-
-                        Text {
-                            textFormat: Text.PlainText
-                            text: "|"
-                            color: Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.3)
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-
-                        // 2d Green Metric (Failed 2d Reversal / Bullish Evidence)
-                        Row {
-                            spacing: Style.space(3)
-                            anchors.verticalCenter: parent.verticalCenter
-
-                            Text {
-                                textFormat: Text.PlainText
-                                text: "2d Green: " + Math.round(root.breadthMetrics.pctF2d || 0) + "%"
-                                color: (root.breadthMetrics.pctF2d || 0) >= 20 ? root.upColor : root.foreground
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
-                                font.bold: true
-                            }
-
-                            Text {
-                                textFormat: Text.PlainText
-                                text: (root.breadthMetrics.countF2d || 0) + "/" + root.breadthMetrics.totalHoldings
-                                color: root.dim
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
+                                    Text {
+                                        textFormat: Text.PlainText
+                                        text: modelData.count + "/" + root.breadthMetrics.totalHoldings
+                                        color: root.dim
+                                        font.family: root.fontFamily
+                                        font.pixelSize: Style.font.caption
+                                    }
+                                }
                             }
                         }
                     }
@@ -1695,18 +1671,34 @@ FloatingWindow {
             }
         }
 
-        // 1px Hairline Divider
-        Rectangle {
+        // 1px Hairline Divider + Parallel Fetch Progress Bar
+        Item {
+            id: headerDivider
             width: parent.width
-            height: 1
-            color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.12)
+            height: 2
+
+            Rectangle {
+                anchors.top: parent.top
+                width: parent.width
+                height: 1
+                color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.12)
+            }
+
+            FinanceLoader {
+                readonly property bool workersBusy: worker0.running || worker1.running || worker2.running || worker3.running || root.pendingFetches.length > 0
+                readonly property int totalTarget: Math.max(1, root.holdingsList.length)
+                anchors.fill: parent
+                active: workersBusy
+                progress: workersBusy ? Math.max(0.08, Math.min(1.0, 1.0 - (root.pendingFetches.length / totalTarget))) : 0
+                color: Color.accent
+            }
         }
 
         // VIEWPORT CONTAINER (Swaps between 1x1 Dynamic Flex Grid and Drill-Down)
         Item {
             id: mainContainer
             width: parent.width
-            height: parent.height - masterHeader.height - 1
+            height: parent.height - masterHeader.height - headerDivider.height
 
             // 1. DYNAMIC FLEX 1X1 GRID VIEWPORT (Visible when !inDrillDown)
             Item {
@@ -1726,12 +1718,22 @@ FloatingWindow {
                     spacing: 0
 
                     Repeater {
-                        model: root.filteredTiles
+                        model: tileListModel
 
                         Item {
                             id: tileWrapper
-                            required property var modelData
+                            required property string symbol
+                            required property string name
                             required property int index
+                            property int dataRev: 0
+
+                            Connections {
+                                target: root
+                                function onSymbolDataUpdated(sym) {
+                                    if (!sym || sym === tileWrapper.symbol)
+                                        tileWrapper.dataRev++;
+                                }
+                            }
 
                             width: gridViewport.cellWidth
                             height: gridViewport.cellHeight
@@ -1750,8 +1752,8 @@ FloatingWindow {
                                 id: cellInstance
                                 anchors.fill: parent
                                 cellIndex: tileWrapper.index
-                                symbol: tileWrapper.modelData.symbol
-                                companyName: tileWrapper.modelData.name || ""
+                                symbol: tileWrapper.symbol
+                                companyName: tileWrapper.name || ""
                                 timeframe: root.timeframe
                                 showBroadening: root.showBroadening
                                 hideStratBadge: true
@@ -1759,23 +1761,23 @@ FloatingWindow {
                                 activeFocusCell: root.activeTileIndex === tileWrapper.index
                                 zoomCount: root.globalBarCount
 
-                                quote: root.quotes[tileWrapper.modelData.symbol] || null
-                                candles: root.getCandles(tileWrapper.modelData.symbol, root.timeframe)
-                                hourlyCandles: root.getCandles(tileWrapper.modelData.symbol, "60")
-                                dailyCandles: root.getCandles(tileWrapper.modelData.symbol, "1D")
-                                priceLevels: root.symbolLevels[tileWrapper.modelData.symbol] || []
+                                quote: (tileWrapper.dataRev >= 0) ? (root.quotes[tileWrapper.symbol] || null) : null
+                                candles: (tileWrapper.dataRev >= 0) ? root.getCandles(tileWrapper.symbol, root.timeframe) : []
+                                hourlyCandles: (tileWrapper.dataRev >= 0) ? root.getCandles(tileWrapper.symbol, "60") : []
+                                dailyCandles: (tileWrapper.dataRev >= 0) ? root.getCandles(tileWrapper.symbol, "1D") : []
+                                priceLevels: root.symbolLevels[tileWrapper.symbol] || []
 
                                 onFocusRequested: function (idx) {
                                     root.activeTileIndex = idx;
                                     keyboardListener.forceActiveFocus();
                                 }
                                 onMaximizeRequested: function (idx) {
-                                    root.drillDownSymbol = tileWrapper.modelData.symbol;
+                                    root.drillDownSymbol = tileWrapper.symbol;
                                     root.inDrillDown = true;
                                 }
                                 onCrosshairMoved: function (ts, pr, c) {
                                     if (root.syncCrosshair) {
-                                        root.broadcastCrosshair(tileWrapper.modelData.symbol, ts, pr, c);
+                                        root.broadcastCrosshair(tileWrapper.symbol, ts, pr, c);
                                     }
                                 }
                                 onCrosshairCleared: {
@@ -1789,6 +1791,32 @@ FloatingWindow {
                             }
                         }
                     }
+                }
+
+                FinanceStatusBanner {
+                    visible: gridViewport.visibleCount === 0
+                    anchors.centerIn: parent
+                    width: Math.min(Style.space(420), parent.width - Style.space(32))
+                    compact: false
+                    tone: "info"
+                    title: (root.holdingsList.length === 0) ? qsTr("Loading sector holdings…") : qsTr("No matching tickers")
+                    text: (root.holdingsList.length === 0)
+                        ? qsTr("Fetching constituent holdings and chart data for %1.").arg(root.sectorSymbol)
+                        : qsTr("No holdings in %1 match the current scenario filter or lock.").arg(root.sectorSymbol)
+                    actionText: root.scenarioFilterText !== "" ? qsTr("Clear filter") : (root.lockStack.length > 0 ? qsTr("Unlock all") : "")
+                    secondaryActionText: (root.scenarioFilterText !== "" && root.lockStack.length > 0) ? qsTr("Unlock all") : ""
+                    fontFamily: root.fontFamily
+                    foreground: root.foreground
+                    dimColor: root.dim
+                    onActionTriggered: {
+                        if (root.scenarioFilterText !== "") {
+                            root.scenarioFilterText = "";
+                            scenarioInput.text = "";
+                        } else if (root.lockStack.length > 0) {
+                            root.clearAllLocks();
+                        }
+                    }
+                    onSecondaryActionTriggered: root.clearAllLocks()
                 }
             }
 
@@ -1814,30 +1842,18 @@ FloatingWindow {
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: Style.space(12)
 
-                            Rectangle {
-                                width: backText.implicitWidth + Style.space(16)
-                                height: Style.space(22)
-                                radius: Style.space(3)
-                                color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
-                                border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.25)
-                                border.width: 1
-
-                                Text {
-                                    id: backText
-                                    anchors.centerIn: parent
-                                    textFormat: Text.PlainText
-                                    text: "← BACK TO SECTOR GRID (Esc)"
-                                    color: root.foreground
-                                    font.family: root.fontFamily
-                                    font.pixelSize: Style.font.caption
-                                    font.bold: true
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.inDrillDown = false
-                                }
+                            FinanceChipButton {
+                                bordered: true
+                                text: "← BACK TO SECTOR GRID (Esc)"
+                                checked: true
+                                foreground: root.foreground
+                                dimColor: root.dim
+                                fontFamily: root.fontFamily
+                                fontSize: Style.font.caption
+                                horizontalPadding: Style.space(8)
+                                verticalPadding: Style.space(3)
+                                cornerRadius: Style.space(3)
+                                onClicked: root.inDrillDown = false
                             }
 
                             Text {
@@ -1875,10 +1891,10 @@ FloatingWindow {
                                 showBroadening: root.showBroadening
                                 disableTickerSearch: true
                                 zoomCount: root.globalBarCount
-                                quote: root.quotes[root.drillDownSymbol] || null
-                                candles: root.getCandles(root.drillDownSymbol, "30")
-                                hourlyCandles: root.getCandles(root.drillDownSymbol, "60")
-                                dailyCandles: root.getCandles(root.drillDownSymbol, "1D")
+                                quote: (root.drillDownDataRev >= 0) ? (root.quotes[root.drillDownSymbol] || null) : null
+                                candles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "30") : []
+                                hourlyCandles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "60") : []
+                                dailyCandles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "1D") : []
                                 onZoomChangedManually: function (idx, nextZoom) {
                                     root.setGlobalBarCountDebounced(nextZoom);
                                 }
@@ -1893,10 +1909,10 @@ FloatingWindow {
                                 showBroadening: root.showBroadening
                                 disableTickerSearch: true
                                 zoomCount: root.globalBarCount
-                                quote: root.quotes[root.drillDownSymbol] || null
-                                candles: root.getCandles(root.drillDownSymbol, "60")
-                                hourlyCandles: root.getCandles(root.drillDownSymbol, "60")
-                                dailyCandles: root.getCandles(root.drillDownSymbol, "1D")
+                                quote: (root.drillDownDataRev >= 0) ? (root.quotes[root.drillDownSymbol] || null) : null
+                                candles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "60") : []
+                                hourlyCandles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "60") : []
+                                dailyCandles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "1D") : []
                                 onZoomChangedManually: function (idx, nextZoom) {
                                     root.setGlobalBarCountDebounced(nextZoom);
                                 }
@@ -1918,10 +1934,10 @@ FloatingWindow {
                                 showBroadening: root.showBroadening
                                 disableTickerSearch: true
                                 zoomCount: root.globalBarCount
-                                quote: root.quotes[root.drillDownSymbol] || null
-                                candles: root.getCandles(root.drillDownSymbol, "1D")
-                                hourlyCandles: root.getCandles(root.drillDownSymbol, "60")
-                                dailyCandles: root.getCandles(root.drillDownSymbol, "1D")
+                                quote: (root.drillDownDataRev >= 0) ? (root.quotes[root.drillDownSymbol] || null) : null
+                                candles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "1D") : []
+                                hourlyCandles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "60") : []
+                                dailyCandles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "1D") : []
                                 onZoomChangedManually: function (idx, nextZoom) {
                                     root.setGlobalBarCountDebounced(nextZoom);
                                 }
@@ -1936,10 +1952,10 @@ FloatingWindow {
                                 showBroadening: root.showBroadening
                                 disableTickerSearch: true
                                 zoomCount: root.globalBarCount
-                                quote: root.quotes[root.drillDownSymbol] || null
-                                candles: root.getCandles(root.drillDownSymbol, "1W")
-                                hourlyCandles: root.getCandles(root.drillDownSymbol, "60")
-                                dailyCandles: root.getCandles(root.drillDownSymbol, "1D")
+                                quote: (root.drillDownDataRev >= 0) ? (root.quotes[root.drillDownSymbol] || null) : null
+                                candles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "1W") : []
+                                hourlyCandles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "60") : []
+                                dailyCandles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "1D") : []
                                 onZoomChangedManually: function (idx, nextZoom) {
                                     root.setGlobalBarCountDebounced(nextZoom);
                                 }
@@ -1954,10 +1970,10 @@ FloatingWindow {
                                 showBroadening: root.showBroadening
                                 disableTickerSearch: true
                                 zoomCount: root.globalBarCount
-                                quote: root.quotes[root.drillDownSymbol] || null
-                                candles: root.getCandles(root.drillDownSymbol, "1M")
-                                hourlyCandles: root.getCandles(root.drillDownSymbol, "60")
-                                dailyCandles: root.getCandles(root.drillDownSymbol, "1D")
+                                quote: (root.drillDownDataRev >= 0) ? (root.quotes[root.drillDownSymbol] || null) : null
+                                candles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "1M") : []
+                                hourlyCandles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "60") : []
+                                dailyCandles: (root.drillDownDataRev >= 0) ? root.getCandles(root.drillDownSymbol, "1D") : []
                                 onZoomChangedManually: function (idx, nextZoom) {
                                     root.setGlobalBarCountDebounced(nextZoom);
                                 }
@@ -1989,6 +2005,17 @@ FloatingWindow {
             var raw = barsInput.text.trim();
             if (raw.length > 0)
                 root.setGlobalBarCount(raw);
+        }
+    }
+
+    Timer {
+        id: scenarioDebounceTimer
+        interval: 150
+        repeat: false
+        onTriggered: {
+            if (typeof scenarioField !== "undefined") {
+                root.scenarioFilter = scenarioField.text.trim();
+            }
         }
     }
 

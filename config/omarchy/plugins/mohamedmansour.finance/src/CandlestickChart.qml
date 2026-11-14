@@ -13,7 +13,7 @@ Item {
     property color downColor: Color.foreground
     property color gridColor: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.08)
     property color crosshairColor: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.35)
-    property color labelColor: Color.muted
+    property color labelColor: Model.accessibleDimColor(Color.foreground, Color.background)
     property string currency: "USD"
     property var priceHint: 2
     property string rangeKey: "1D"
@@ -348,10 +348,24 @@ Item {
         isSyncing = false;
     }
 
+    property var _cachedCandlesSource: null
+    property int _cachedCandlesLen: -1
+    property string _cachedLastCandleSig: ""
+    property var _cachedValidCandles: []
+    property var _cachedBfValidRef: null
+    property string _cachedBfAnchor: ""
+    property var _cachedBfResult: null
+
     function validCandles() {
         var src = root.candles || [];
+        var srcLen = src.length;
+        var last = srcLen > 0 ? src[srcLen - 1] : null;
+        var lastSig = last ? (last.timestamp + ":" + last.open + ":" + last.high + ":" + last.low + ":" + last.close) : "";
+        if (src === root._cachedCandlesSource && srcLen === root._cachedCandlesLen && lastSig === root._cachedLastCandleSig) {
+            return root._cachedValidCandles;
+        }
         var out = [];
-        for (var i = 0; i < src.length; i++) {
+        for (var i = 0; i < srcLen; i++) {
             var c = src[i];
             if (!c)
                 continue;
@@ -360,16 +374,26 @@ Item {
             var l = Number(c.low);
             var cl = Number(c.close);
             if (isFinite(o) && isFinite(h) && isFinite(l) && isFinite(cl)) {
-                out.push({
+                var prevValid = out.length > 0 ? out[out.length - 1] : null;
+                var item = {
                     timestamp: c.timestamp,
                     open: o,
                     high: h,
                     low: l,
                     close: cl,
-                    volume: c.volume || 0
-                });
+                    volume: c.volume || 0,
+                    strat: ""
+                };
+                item.strat = Model.stratScenario(item, prevValid);
+                out.push(item);
             }
         }
+        root._cachedCandlesSource = src;
+        root._cachedCandlesLen = srcLen;
+        root._cachedLastCandleSig = lastSig;
+        root._cachedValidCandles = out;
+        root._cachedBfValidRef = null;
+        root._cachedBfResult = null;
         return out;
     }
 
@@ -436,11 +460,7 @@ Item {
 
         var strats = [];
         for (var si = 0; si < list.length; si++) {
-            var globalIdx = vStart + si;
-            var prev = globalIdx > 0 ? all[globalIdx - 1] : null;
-            var st = Model.stratScenario(list[si], prev);
-            list[si].strat = st;
-            strats.push(st);
+            strats.push(list[si].strat || "");
         }
 
         var min = list[0].low;
@@ -632,7 +652,14 @@ Item {
         var bf = null;
         if (root.showBroadening && (isThirtyMinChart || isDailyChart || isHourlyChart || isWeeklyChart || isMonthlyChart) && all && all.length >= 3 && innerW > 0) {
             var anchorMode = isThirtyMinChart ? "day" : (isHourlyChart ? "week" : (isWeeklyChart ? "quarter" : (isMonthlyChart ? "year" : "month")));
-            bf = Model.computeActiveBroadening(all, null, anchorMode);
+            if (root._cachedBfValidRef === all && root._cachedBfAnchor === anchorMode) {
+                bf = root._cachedBfResult;
+            } else {
+                bf = Model.computeActiveBroadening(all, null, anchorMode);
+                root._cachedBfValidRef = all;
+                root._cachedBfAnchor = anchorMode;
+                root._cachedBfResult = bf;
+            }
         }
 
         return {
@@ -835,7 +862,7 @@ Item {
                     var isHoveredTick = (ti === root.hoveredTickIndex);
 
                     ctx.font = (isHoveredTick ? "bold " : "") + Style.font.bodySmall + "px " + Model.quotedFontFamily(root.fontFamily);
-                    ctx.fillStyle = isHoveredTick ? Color.foreground : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.45);
+                    ctx.fillStyle = isHoveredTick ? Color.foreground : root.labelColor;
                     ctx.textAlign = "left";
                     ctx.textBaseline = "middle";
                     ctx.fillText(t.label, g.right + Style.space(6), Math.round(t.y));
@@ -1001,7 +1028,7 @@ Item {
                     var lx2 = ep.drawX2;
                     var isLvlActive = (li === root.hoveredLevelIndex || li === root.draggingLevelIndex || li === root.editingLevelIndex);
                     var isArmedAlert = Boolean(lvl.alertEnabled) && !lvl.alertTriggered;
-                    var lvlColor = (lvl.tone === "up" || lvl.tone === "down") ? root.levelToneColor(lvl.tone) : (isArmedAlert ? Color.accent.primary : root.levelToneColor(lvl.tone));
+                    var lvlColor = (lvl.tone === "up" || lvl.tone === "down") ? root.levelToneColor(lvl.tone) : (isArmedAlert ? Model.accessibleSemanticColor("warning", Color.background) : root.levelToneColor(lvl.tone));
 
                     ctx.save();
                     ctx.strokeStyle = lvlColor;
@@ -1108,7 +1135,7 @@ Item {
             // Bottom Time Scale Axis Ticks
             if (root.showTimeScale && g.timeTicks && g.timeTicks.length > 0) {
                 ctx.font = Style.font.bodySmall + "px " + Model.quotedFontFamily(root.fontFamily);
-                ctx.fillStyle = Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.45);
+                ctx.fillStyle = root.labelColor;
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
                 var tickY = Math.round(g.bot + Style.space(9));
@@ -1506,7 +1533,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: levelTextInput.text.length === 0
                     text: "Label (Tab=color)..."
-                    color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.4)
+                    color: root.labelColor
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.bodySmall
                 }
@@ -1550,64 +1577,46 @@ Item {
                 }
             }
 
-            Rectangle {
+            FinanceChipButton {
                 id: alertToggleBadge
                 anchors.verticalCenter: parent.verticalCenter
-                height: Style.space(16)
-                width: alertToggleLabel.implicitWidth + Style.space(8)
-                radius: Style.space(2)
-                color: (levelEditOverlay.activeLvl && levelEditOverlay.activeLvl.alertEnabled) ? Qt.rgba(Color.accent.primary.r, Color.accent.primary.g, Color.accent.primary.b, 0.22) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.08)
-                border.width: 1
-                border.color: (levelEditOverlay.activeLvl && levelEditOverlay.activeLvl.alertEnabled) ? Color.accent.primary : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.25)
-
-                Text {
-                    id: alertToggleLabel
-                    anchors.centerIn: parent
-                    text: (levelEditOverlay.activeLvl && levelEditOverlay.activeLvl.alertEnabled) ? "ALRT ON" : "ALRT OFF"
-                    color: (levelEditOverlay.activeLvl && levelEditOverlay.activeLvl.alertEnabled) ? Color.accent.primary : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.65)
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall - 1
-                    font.bold: true
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.toggleEditingLevelAlert()
-                }
+                bordered: true
+                checked: Boolean(levelEditOverlay.activeLvl && levelEditOverlay.activeLvl.alertEnabled)
+                text: checked ? "ALRT ON" : "ALRT OFF"
+                foreground: Color.accent
+                dimColor: root.labelColor
+                accentColor: Color.accent
+                fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall - 1
+                horizontalPadding: Style.space(4)
+                verticalPadding: Style.space(1)
+                cornerRadius: Style.space(2)
+                tooltipText: "Toggle price crossover alert (Alt+A)"
+                onClicked: root.toggleEditingLevelAlert()
             }
 
-            Rectangle {
+            FinanceChipButton {
                 id: alertCondBadge
                 visible: Boolean(levelEditOverlay.activeLvl && levelEditOverlay.activeLvl.alertEnabled)
                 anchors.verticalCenter: parent.verticalCenter
-                height: Style.space(16)
-                width: alertCondLabel.implicitWidth + Style.space(8)
-                radius: Style.space(2)
-                color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.1)
-
-                Text {
-                    id: alertCondLabel
-                    anchors.centerIn: parent
-                    text: {
-                        var cond = levelEditOverlay.activeLvl ? levelEditOverlay.activeLvl.alertCondition : "CROSSES_ABOVE";
-                        if (cond === "CROSSES_BELOW")
-                            return "<=";
-                        if (cond === "CROSSES")
-                            return "<>";
-                        return ">=";
-                    }
-                    color: Color.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall - 1
-                    font.bold: true
+                bordered: true
+                checked: true
+                text: {
+                    var cond = levelEditOverlay.activeLvl ? levelEditOverlay.activeLvl.alertCondition : "CROSSES_ABOVE";
+                    if (cond === "CROSSES_BELOW")
+                        return "<=";
+                    if (cond === "CROSSES")
+                        return "<>";
+                    return ">=";
                 }
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.cycleEditingLevelCondition()
-                }
+                foreground: Color.foreground
+                fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall - 1
+                horizontalPadding: Style.space(4)
+                verticalPadding: Style.space(1)
+                cornerRadius: Style.space(2)
+                tooltipText: "Cycle crossover condition"
+                onClicked: root.cycleEditingLevelCondition()
             }
 
             Text {
