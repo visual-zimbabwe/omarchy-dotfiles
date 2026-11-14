@@ -687,14 +687,15 @@ test("shared feedback primitives provide interactive, loading, status, empty-sta
   assert.match(sectorWin, /FinanceStatusBanner\s*\{/)
 })
 
-test("grid window and cell headers wrap or constrain controls without overlapping", () => {
+test("grid window and cell headers adapt or constrain controls without overlapping", () => {
   const gridWin = fs.readFileSync(source("GridWindow.qml"), "utf8")
   const gridCell = fs.readFileSync(source("GridCell.qml"), "utf8")
   const selector = fs.readFileSync(source("InlineExpandSelector.qml"), "utf8")
 
-  assert.match(gridWin, /id:\s*masterHeader[\s\S]*?height:\s*Math\.max\(Style\.space\(36\),\s*headerFlow\.implicitHeight/)
-  assert.match(gridWin, /Flow\s*\{\s*id:\s*headerFlow/)
-  assert.match(gridWin, /Flow\s*\{\s*id:\s*syncControlsFlow/)
+  assert.match(gridWin, /id:\s*masterHeader[\s\S]*?height:\s*Style\.space\(36\)/)
+  assert.match(gridWin, /readonly property bool compactSync:/)
+  assert.match(gridWin, /id:\s*leftControlsRow[\s\S]*?anchors\.right:\s*rightControlsRow\.left/)
+  assert.match(gridWin, /QQC\.Popup\s*\{\s*id:\s*syncPopup/)
   assert.match(gridWin, /InlineExpandSelector\s*\{/)
   assert.match(gridCell, /anchors\.right:\s*\(stratTagItem\.visible\s*&&\s*stratTagItem\.width\s*>\s*0\)\s*\?\s*stratTagItem\.left\s*:\s*parent\.right/)
   assert.match(gridCell, /InlineExpandSelector\s*\{/)

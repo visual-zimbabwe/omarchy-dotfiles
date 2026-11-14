@@ -814,11 +814,78 @@ FloatingWindow {
             anchors.fill: parent
             spacing: 0
 
-            // Master Text Control Header (Zero-Chrome, Responsive Flow)
+            // Master Text Control Header (Zero-Chrome, Single-Row TradingView-Style)
             Item {
                 id: masterHeader
                 width: parent.width
-                height: Math.max(Style.space(36), headerFlow.implicitHeight + Style.space(12))
+                height: Style.space(36)
+
+                readonly property int syncActiveCount: (root.syncSymbol ? 1 : 0) + (root.syncTimeframe ? 1 : 0) + (root.syncCrosshair ? 1 : 0) + (root.syncTime ? 1 : 0)
+                readonly property var syncToggles: [
+                    {
+                        key: "sym",
+                        label: "SYM " + (root.syncSymbol ? "[ON]" : "[OFF]"),
+                        fullLabel: "Symbol",
+                        checked: root.syncSymbol,
+                        tooltip: "Sync symbol across all cells"
+                    },
+                    {
+                        key: "tf",
+                        label: "TF " + (root.syncTimeframe ? "[ON]" : "[OFF]"),
+                        fullLabel: "Timeframe",
+                        checked: root.syncTimeframe,
+                        tooltip: "Sync timeframe across all cells"
+                    },
+                    {
+                        key: "cross",
+                        label: "CROSS " + (root.syncCrosshair ? "[ON]" : "[OFF]"),
+                        fullLabel: "Crosshair",
+                        checked: root.syncCrosshair,
+                        tooltip: "Sync crosshair across all cells"
+                    },
+                    {
+                        key: "time",
+                        label: "TIME " + (root.syncTime ? "[ON]" : "[OFF]"),
+                        fullLabel: "Time Scroll",
+                        checked: root.syncTime,
+                        tooltip: "Sync time scroll across all cells"
+                    }
+                ]
+                readonly property real fullRightWidth: inlineSyncRow.implicitWidth + bfChip.implicitWidth + alertsMuteToggle.implicitWidth + (root.fetching ? Style.space(22) : 0) + Style.space(18)
+                readonly property bool compactSync: (leftControlsRow.implicitWidth + fullRightWidth + Style.space(40)) > width
+
+                function toggleSyncOption(key) {
+                    if (key === "sym") {
+                        root.syncSymbol = !root.syncSymbol;
+                        if (root.syncSymbol) {
+                            var currentSym = root.symbolForCell(root.activeCellIndex);
+                            root.mainSymbol = currentSym;
+                            var nextSymbols = [];
+                            for (var i = 0; i < 5; i++)
+                                nextSymbols.push(currentSym);
+                            root.cellSymbols = nextSymbols;
+                        }
+                        root.refreshQuotes();
+                        root.refreshAllCharts();
+                    } else if (key === "tf") {
+                        root.syncTimeframe = !root.syncTimeframe;
+                        if (root.syncTimeframe) {
+                            var currentTf = root.timeframeForCell(root.activeCellIndex);
+                            var nextTfs = [];
+                            for (var j = 0; j < 5; j++)
+                                nextTfs.push(currentTf);
+                            root.cellTimeframes = nextTfs;
+                        } else {
+                            root.cellTimeframes = Model.gridTimeframes(root.gridMode === "1x1" ? root.previousGridMode : root.gridMode);
+                        }
+                        root.refreshAllCharts();
+                    } else if (key === "cross") {
+                        root.syncCrosshair = !root.syncCrosshair;
+                    } else if (key === "time") {
+                        root.syncTime = !root.syncTime;
+                    }
+                    root.saveGridState();
+                }
 
                 component SyncChip: FinanceChipButton {
                     foreground: root.foreground
@@ -826,19 +893,21 @@ FloatingWindow {
                     fontFamily: root.fontFamily
                 }
 
-                Flow {
-                    id: headerFlow
+                // Left-aligned Grid & Replay Controls (clipped cleanly before right controls)
+                Row {
+                    id: leftControlsRow
                     anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
                     anchors.leftMargin: Style.space(12)
-                    anchors.rightMargin: Style.space(12)
-                    spacing: Style.space(12)
+                    anchors.right: rightControlsRow.left
+                    anchors.rightMargin: Style.space(8)
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.space(20)
+                    clip: true
 
                     // Grid Layout Selector (Left-aligned, collapsible)
                     Row {
                         id: gridLayoutRow
-                        height: Style.space(24)
+                        anchors.verticalCenter: parent.verticalCenter
                         spacing: Style.space(8)
 
                         Text {
@@ -893,7 +962,7 @@ FloatingWindow {
                     // Replay Control (Center-Left, Zero-Chrome)
                     Row {
                         id: replayControlRow
-                        height: Style.space(24)
+                        anchors.verticalCenter: parent.verticalCenter
                         spacing: Style.space(6)
 
                         readonly property color replayAmber: Qt.rgba(0.92, 0.65, 0.15, 1)
@@ -1000,27 +1069,28 @@ FloatingWindow {
                             }
                         }
                     }
+                }
 
-                    // Pushes Sync Toggles right when there is room; collapses when wrapping.
-                    Item {
-                        readonly property real available: headerFlow.width - gridLayoutRow.width - replayControlRow.width - syncControlsFlow.implicitWidth - headerFlow.spacing * 3
-                        visible: available > 0
-                        width: Math.max(0, available)
-                        height: 1
+                // Right-aligned Controls (inline when wide, compact SYNC dropdown when narrow)
+                Row {
+                    id: rightControlsRow
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.space(12)
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.space(6)
+
+                    FinanceLoader {
+                        active: root.fetching
+                        color: root.dim
+                        spinnerSize: Style.font.bodySmall
+                        anchors.verticalCenter: parent.verticalCenter
                     }
 
-                    // Sync Toggles (Right-aligned when wide, wraps cleanly when narrow)
-                    Flow {
-                        id: syncControlsFlow
-                        width: Math.min(implicitWidth, headerFlow.width)
+                    Row {
+                        id: inlineSyncRow
+                        visible: !masterHeader.compactSync
+                        anchors.verticalCenter: parent.verticalCenter
                         spacing: Style.space(6)
-
-                        FinanceLoader {
-                            active: root.fetching
-                            color: root.dim
-                            spinnerSize: Style.font.bodySmall
-                            height: Style.space(24)
-                        }
 
                         Text {
                             text: "SYNC"
@@ -1028,89 +1098,92 @@ FloatingWindow {
                             font.family: root.fontFamily
                             font.pixelSize: Style.font.bodySmall
                             font.bold: true
-                            height: Style.space(24)
-                            verticalAlignment: Text.AlignVCenter
+                            anchors.verticalCenter: parent.verticalCenter
                         }
 
-                        SyncChip {
-                            text: "SYM " + (root.syncSymbol ? "[ON]" : "[OFF]")
-                            checked: root.syncSymbol
-                            tooltipText: "Sync symbol across all cells"
-                            onClicked: {
-                                root.syncSymbol = !root.syncSymbol;
-                                if (root.syncSymbol) {
-                                    var currentSym = root.symbolForCell(root.activeCellIndex);
-                                    root.mainSymbol = currentSym;
-                                    var nextSymbols = [];
-                                    for (var i = 0; i < 5; i++)
-                                        nextSymbols.push(currentSym);
-                                    root.cellSymbols = nextSymbols;
+                        Repeater {
+                            model: masterHeader.syncToggles
+
+                            SyncChip {
+                                required property var modelData
+                                text: modelData.label
+                                checked: modelData.checked
+                                tooltipText: modelData.tooltip
+                                anchors.verticalCenter: parent.verticalCenter
+                                onClicked: masterHeader.toggleSyncOption(modelData.key)
+                            }
+                        }
+                    }
+
+                    SyncChip {
+                        id: compactSyncButton
+                        visible: masterHeader.compactSync
+                        text: "SYNC [" + masterHeader.syncActiveCount + "/4] ▾"
+                        checked: masterHeader.syncActiveCount > 0 || syncPopup.visible
+                        tooltipText: "Sync options across cells"
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: {
+                            if (syncPopup.visible)
+                                syncPopup.close();
+                            else
+                                syncPopup.open();
+                        }
+
+                        QQC.Popup {
+                            id: syncPopup
+                            parent: compactSyncButton
+                            x: Math.min(0, compactSyncButton.width - width)
+                            y: compactSyncButton.height + Style.space(4)
+                            padding: Style.space(6)
+                            closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutsideParent
+
+                            background: FinanceSurface {
+                                elevation: 3
+                                radiusToken: "md"
+                                foregroundColor: root.foreground
+                                surfaceColor: (Color.popups && Color.popups.background) ? Color.popups.background : Color.background
+                            }
+
+                            contentItem: Column {
+                                spacing: Style.space(4)
+
+                                Repeater {
+                                    model: masterHeader.syncToggles
+
+                                    SyncChip {
+                                        required property var modelData
+                                        width: Style.space(150)
+                                        text: modelData.fullLabel + " " + (modelData.checked ? "[ON]" : "[OFF]")
+                                        checked: modelData.checked
+                                        tooltipText: modelData.tooltip
+                                        onClicked: masterHeader.toggleSyncOption(modelData.key)
+                                    }
                                 }
-                                root.refreshQuotes();
-                                root.refreshAllCharts();
-                                root.saveGridState();
                             }
                         }
+                    }
 
-                        SyncChip {
-                            text: "TF " + (root.syncTimeframe ? "[ON]" : "[OFF]")
-                            checked: root.syncTimeframe
-                            tooltipText: "Sync timeframe across all cells"
-                            onClicked: {
-                                root.syncTimeframe = !root.syncTimeframe;
-                                if (root.syncTimeframe) {
-                                    var currentTf = root.timeframeForCell(root.activeCellIndex);
-                                    var nextTfs = [];
-                                    for (var i = 0; i < 5; i++)
-                                        nextTfs.push(currentTf);
-                                    root.cellTimeframes = nextTfs;
-                                } else {
-                                    root.cellTimeframes = Model.gridTimeframes(root.gridMode === "1x1" ? root.previousGridMode : root.gridMode);
-                                }
-                                root.refreshAllCharts();
-                                root.saveGridState();
-                            }
+                    SyncChip {
+                        id: bfChip
+                        text: "BF " + (root.showBroadening ? "[ON]" : "[OFF]")
+                        checked: root.showBroadening
+                        tooltipText: "Toggle Broadening Formation lines"
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: {
+                            root.showBroadening = !root.showBroadening;
+                            root.saveGridState();
                         }
+                    }
 
-                        SyncChip {
-                            text: "CROSS " + (root.syncCrosshair ? "[ON]" : "[OFF]")
-                            checked: root.syncCrosshair
-                            tooltipText: "Sync crosshair across all cells"
-                            onClicked: {
-                                root.syncCrosshair = !root.syncCrosshair;
-                                root.saveGridState();
-                            }
-                        }
-
-                        SyncChip {
-                            text: "TIME " + (root.syncTime ? "[ON]" : "[OFF]")
-                            checked: root.syncTime
-                            tooltipText: "Sync time scroll across all cells"
-                            onClicked: {
-                                root.syncTime = !root.syncTime;
-                                root.saveGridState();
-                            }
-                        }
-
-                        SyncChip {
-                            text: "BF " + (root.showBroadening ? "[ON]" : "[OFF]")
-                            checked: root.showBroadening
-                            tooltipText: "Toggle Broadening Formation lines"
-                            onClicked: {
-                                root.showBroadening = !root.showBroadening;
-                                root.saveGridState();
-                            }
-                        }
-
-                        SyncChip {
-                            id: alertsMuteToggle
-                            text: "ALERTS " + (root.alertsMuted ? "[MUTED]" : "[ON]")
-                            checked: true
-                            foreground: root.alertsMuted ? Color.urgent : root.foreground
-                            accentColor: root.alertsMuted ? Color.urgent : Color.accent
-                            tooltipText: root.alertsMuted ? (root.alertsMuteStatus + " · click to unmute") : "Click to mute alerts until the next market open"
-                            onClicked: root.alertsMuteToggleRequested()
-                        }
+                    SyncChip {
+                        id: alertsMuteToggle
+                        text: "ALERTS " + (root.alertsMuted ? "[MUTED]" : "[ON]")
+                        checked: true
+                        foreground: root.alertsMuted ? Color.urgent : root.foreground
+                        accentColor: root.alertsMuted ? Color.urgent : Color.accent
+                        tooltipText: root.alertsMuted ? (root.alertsMuteStatus + " · click to unmute") : "Click to mute alerts until the next market open"
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: root.alertsMuteToggleRequested()
                     }
                 }
             }
