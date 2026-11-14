@@ -28,18 +28,18 @@
   "detailRange": "1M",
   "gridMode": "2+3",
   "gridSync": {
-    "symbol": false,
-    "timeframe": false,
+    "broadening": false,
     "crosshair": false,
+    "symbol": false,
     "time": false,
-    "broadening": false
+    "timeframe": false
   },
   "gridSymbols": [
-    "SMH",
-    "SMH",
-    "SMH",
-    "SMH",
-    "SMH"
+    "DIA",
+    "DIA",
+    "DIA",
+    "DIA",
+    "DIA"
   ],
   "gridSplits": {
     "2x2": {
@@ -123,8 +123,8 @@
             "1M"
           ],
           "zooms": [
+            16,
             8,
-            20,
             8,
             8,
             8
@@ -237,7 +237,7 @@
     "1M"
   ],
   "gridZooms": [
-    8,
+    16,
     8,
     8,
     8,

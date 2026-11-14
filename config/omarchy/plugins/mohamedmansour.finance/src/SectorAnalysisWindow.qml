@@ -77,9 +77,10 @@ FloatingWindow {
             if (root.inDrillDown)
                 root.drillDownDataRev++;
         }
-        breadthUpdateTimer.restart();
-        if ((root.scenarioFilter || "").trim() !== "" || root.sortField !== "weight")
-            tileModelSyncTimer.restart();
+        if (!breadthUpdateTimer.running)
+            breadthUpdateTimer.start();
+        if (((root.scenarioFilter || "").trim() !== "" || root.sortField !== "weight") && !tileModelSyncTimer.running)
+            tileModelSyncTimer.start();
     }
 
     function notifyQuotesUpdated(changedSymbols) {
@@ -93,9 +94,10 @@ FloatingWindow {
                     root.drillDownDataRev++;
             }
         }
-        breadthUpdateTimer.restart();
-        if ((root.scenarioFilter || "").trim() !== "" || root.sortField !== "weight")
-            tileModelSyncTimer.restart();
+        if (!breadthUpdateTimer.running)
+            breadthUpdateTimer.start();
+        if (((root.scenarioFilter || "").trim() !== "" || root.sortField !== "weight") && !tileModelSyncTimer.running)
+            tileModelSyncTimer.start();
     }
 
     title: {
@@ -320,7 +322,7 @@ FloatingWindow {
     }
 
     // Breadth Attack Metrics Calculation (Equal-Weighted, throttled via breadthUpdateTimer)
-    property var breadthMetrics: null
+    property var breadthMetrics: Model.computeBasketAttackMetrics("", "", "Sector", [], {}, {}, "1W")
 
     function recomputeBreadthMetrics() {
         var dailyCandlesMap = {};
@@ -1692,7 +1694,7 @@ FloatingWindow {
 
             FinanceLoader {
                 readonly property bool workersBusy: worker0.running || worker1.running || worker2.running || worker3.running || root.pendingFetches.length > 0
-                readonly property int totalTarget: Math.max(1, root.holdingsList.length)
+                readonly property int totalTarget: Math.max(1, (root.holdings || []).length)
                 anchors.fill: parent
                 active: workersBusy
                 progress: workersBusy ? Math.max(0.08, Math.min(1.0, 1.0 - (root.pendingFetches.length / totalTarget))) : 0
@@ -1805,24 +1807,24 @@ FloatingWindow {
                     width: Math.min(Style.space(420), parent.width - Style.space(32))
                     compact: false
                     tone: "info"
-                    title: (root.holdingsList.length === 0) ? qsTr("Loading sector holdings…") : qsTr("No matching tickers")
-                    text: (root.holdingsList.length === 0)
+                    title: ((root.holdings || []).length === 0 && !root.isMultiTicker) ? qsTr("Loading sector holdings…") : qsTr("No matching tickers")
+                    text: ((root.holdings || []).length === 0 && !root.isMultiTicker)
                         ? qsTr("Fetching constituent holdings and chart data for %1.").arg(root.sectorSymbol)
                         : qsTr("No holdings in %1 match the current scenario filter or lock.").arg(root.sectorSymbol)
-                    actionText: root.scenarioFilterText !== "" ? qsTr("Clear filter") : (root.lockStack.length > 0 ? qsTr("Unlock all") : "")
-                    secondaryActionText: (root.scenarioFilterText !== "" && root.lockStack.length > 0) ? qsTr("Unlock all") : ""
+                    actionText: root.scenarioFilter !== "" ? qsTr("Clear filter") : (root.lockStack.length > 0 ? qsTr("Unlock all") : "")
+                    secondaryActionText: (root.scenarioFilter !== "" && root.lockStack.length > 0) ? qsTr("Unlock all") : ""
                     fontFamily: root.fontFamily
                     foreground: root.foreground
                     dimColor: root.dim
                     onActionTriggered: {
-                        if (root.scenarioFilterText !== "") {
-                            root.scenarioFilterText = "";
-                            scenarioInput.text = "";
+                        if (root.scenarioFilter !== "") {
+                            root.scenarioFilter = "";
+                            scenarioField.text = "";
                         } else if (root.lockStack.length > 0) {
-                            root.clearAllLocks();
+                            root.clearLockStack();
                         }
                     }
-                    onSecondaryActionTriggered: root.clearAllLocks()
+                    onSecondaryActionTriggered: root.clearLockStack()
                 }
             }
 
