@@ -157,6 +157,8 @@ def main():
             except (ValueError, AttributeError):
                 pass
 
+    is_torrent_file = raw_magnet.endswith(".torrent") and os.path.isfile(raw_magnet)
+
     if use_peerflix:
         cmd = ["peerflix", enhanced, "--mpv"]
         if save_dir:
@@ -170,6 +172,9 @@ def main():
     else:
         # WebTorrent engine
         cmd = ["webtorrent", enhanced, "--mpv"]
+        if is_torrent_file:
+            for tracker in PUBLIC_TRACKERS:
+                cmd += ["-a", tracker]
         if save_dir:
             cmd += ["-o", save_dir]
         else:

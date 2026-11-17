@@ -10,7 +10,9 @@
         "1": "golden",
         "2": "two-rows-four-columns",
         "3": "two-rows-four-columns",
-        "4": "two-rows-four-columns"
+        "4": "two-rows-four-columns",
+        "5": "custom",
+        "6": "custom"
       }
     }
   ],
@@ -170,11 +172,12 @@
       "fill": "largest",
       "underfill": "rescale",
       "weights": [
-        20,
-        20,
-        20,
-        20,
-        20
+        16.65,
+        16.67,
+        16.67,
+        16.67,
+        16.67,
+        16.67
       ],
       "gridColumns": 0
     }
