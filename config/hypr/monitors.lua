@@ -24,7 +24,7 @@ if has_edp then
     output = "HDMI-A-1",
     mode = "preferred",
     position = "auto-up",
-    scale = 1.0,
+    scale = 1.25,
     vrr = 1,
   })
 

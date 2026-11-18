@@ -93,6 +93,7 @@ copy_clean "$HOME_DIR/.config/newsboat" "$REPO_DIR/config/newsboat"
 copy_clean "$HOME_DIR/.config/mise" "$REPO_DIR/config/mise"
 copy_clean "$HOME_DIR/.config/nvim" "$REPO_DIR/config/nvim"
 copy_clean "$HOME_DIR/.config/hypr" "$REPO_DIR/config/hypr"
+copy_clean "$HOME_DIR/.config/fontconfig" "$REPO_DIR/config/fontconfig"
 copy_clean "$HOME_DIR/.config/omarchy" "$REPO_DIR/config/omarchy"
 
 # VS Code settings
