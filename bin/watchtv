@@ -94,10 +94,41 @@ Tips for Best Results:
 """
 
 def sanitize_query(query_parts):
-    query = " ".join(query_parts)
-    cleaned = re.sub(r"['\":?!,]", "", query)
+    query = " ".join(query_parts).strip()
+    if not query:
+        return ""
+    # Remove apostrophes cleanly ("Grey's" -> "Greys", "It's" -> "Its")
+    query = re.sub(r"['’`]", "", query)
+    # Normalize "Season X Episode Y" / "s1 e2" -> "S01E02"
+    query = re.sub(
+        r"\b(?:season|s)\s*(\d{1,2})\s*(?:episode|ep|e|x)\s*(\d{1,3})\b",
+        lambda m: f"S{int(m.group(1)):02d}E{int(m.group(2)):02d}",
+        query,
+        flags=re.IGNORECASE,
+    )
+    # Normalize "1x05" -> "S01E05"
+    query = re.sub(
+        r"\b(\d{1,2})x(\d{1,3})\b",
+        lambda m: f"S{int(m.group(1)):02d}E{int(m.group(2)):02d}",
+        query,
+        flags=re.IGNORECASE,
+    )
+    # Normalize compact "s1e2" -> "S01E02"
+    query = re.sub(
+        r"\b[sS](\d{1,2})[eE](\d{1,3})\b",
+        lambda m: f"S{int(m.group(1)):02d}E{int(m.group(2)):02d}",
+        query,
+    )
+    cleaned = re.sub(r"[^\w\s\-.]", " ", query)
+    cleaned = re.sub(r"[\-_]+", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
+
+def generate_search_variants(query):
+    variants = [query]
+    if re.search(r"\bS\d{2}E\d{2}\b", query, re.IGNORECASE):
+        variants.append(query.replace(" ", "."))
+    return list(dict.fromkeys(v for v in variants if v))
 
 def format_size(bytes_val):
     try:
@@ -151,41 +182,64 @@ def normalize_text(text):
 def calculate_match_score(release_name, query, target_episode=None):
     norm_release = normalize_text(release_name)
     norm_query = normalize_text(query)
-    
+
     release_words = norm_release.split()
     query_words = norm_query.split()
-    
+
     if not query_words:
         return 0.0
-        
-    sig_query_words = [w for w in query_words if w not in STOP_WORDS]
-    if not sig_query_words:
-        sig_query_words = query_words
-        
+
+    # Separate season/episode token and optional 4-digit year from core title keywords
+    se_match = re.search(r"\bs(\d{1,2})e(\d{1,3})\b", norm_query)
+    year_match = re.search(r"\b(19\d\d|20\d\d)\b", norm_query)
+    se_token = se_match.group(0) if se_match else None
+    year_token = year_match.group(1) if year_match else None
+
+    core_words = [
+        w for w in query_words
+        if w not in STOP_WORDS and w != se_token and w != year_token
+    ]
+    if not core_words:
+        core_words = [w for w in query_words if w not in STOP_WORDS] or query_words
+
     matched_count = 0
-    for q_word in sig_query_words:
+    for q_word in core_words:
         stem = q_word[:-1] if q_word.endswith("s") and len(q_word) > 3 else q_word
         if any(stem == rw or rw.startswith(stem) or stem in rw for rw in release_words):
             matched_count += 1
-            
-    if matched_count < len(sig_query_words):
+
+    # Require >= 75% title keyword match (100% for 1-3 word queries, allows 1 missing word on 4+ word queries)
+    if (matched_count / len(core_words)) < 0.75:
         return 0.0
-        
+
     score = 10.0
+
+    # Season/Episode check: allow exact episode OR matching season pack (S01 / Season 1)
+    if se_match:
+        s_num = int(se_match.group(1))
+        e_num = int(se_match.group(2))
+        ep_re = rf"(?:s0?{s_num}\.?e0?{e_num}\b|0?{s_num}x0?{e_num}\b)"
+        season_pack_re = rf"(?:s0?{s_num}\b|season\s*0?{s_num}\b)"
+        if re.search(ep_re, release_name, re.IGNORECASE):
+            score += 150.0
+        elif re.search(season_pack_re, release_name, re.IGNORECASE) and is_season_pack(release_name):
+            score += 60.0
+        else:
+            return 0.0
+
     query_phrase = " ".join(query_words)
-    sig_phrase = " ".join(sig_query_words)
-    
+    core_phrase = " ".join(core_words)
+
     if query_phrase in norm_release:
         score += 100.0
-    elif sig_phrase in norm_release:
+    elif core_phrase in norm_release:
         score += 80.0
     else:
-        stemmed_sig_phrase = " ".join([w[:-1] if w.endswith("s") and len(w) > 3 else w for w in sig_query_words])
-        if stemmed_sig_phrase in norm_release:
+        stemmed_core = " ".join([w[:-1] if w.endswith("s") and len(w) > 3 else w for w in core_words])
+        if stemmed_core in norm_release:
             score += 70.0
-            
-    year_match = re.search(r"\b(19\d\d|20\d\d)\b", norm_query)
-    if year_match and year_match.group(1) in norm_release:
+
+    if year_token and year_token in norm_release:
         score += 40.0
 
     # Season pack bonus when searching for seasons
@@ -194,13 +248,17 @@ def calculate_match_score(release_name, query, target_episode=None):
 
     # Target episode bonus
     if target_episode:
-        ep_patterns = [
-            f"e{int(target_episode):02d}",
-            f"e{int(target_episode)}",
-            f"episode {int(target_episode)}",
-        ]
-        if any(ep in norm_release for ep in ep_patterns):
-            score += 150.0
+        try:
+            ep_int = int(target_episode)
+            ep_patterns = [
+                f"e{ep_int:02d}",
+                f"e{ep_int}",
+                f"episode {ep_int}",
+            ]
+            if any(ep in norm_release for ep in ep_patterns):
+                score += 150.0
+        except ValueError:
+            pass
 
     return score
 
@@ -240,7 +298,7 @@ def fetch_apibay(query, target_episode=None):
 
 def fetch_solidtorrents(query, target_episode=None):
     try:
-        url = f"https://solidtorrents.to/api/v1/search?q={urllib.parse.quote(query)}&category=video"
+        url = f"https://solidtorrents.to/api/v1/search?q={urllib.parse.quote(query)}&sort=seeders"
         req = urllib.request.Request(
             url,
             headers={
@@ -272,9 +330,59 @@ def fetch_solidtorrents(query, target_episode=None):
         pass
     return []
 
+def _extract_show_title(query):
+    cleaned = re.sub(r"(?i)\b(s\d{1,2}(?:e\d{1,3})?|season\s*\d+|episode\s*\d+|\d{1,2}x\d{1,3}|complete|pack|batch)\b", " ", query)
+    cleaned = re.sub(r"(?i)\b(2160p|1080p|720p|480p|4k|x264|x265|hevc|web-?dl|webrip|bluray|hdtv)\b", " ", cleaned)
+    cleaned = re.sub(r"\b(19\d{2}|20\d{2})\b", " ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
 def fetch_eztv(query, target_episode=None):
+    """Resolve show IMDb ID via TVMaze and query EZTV by imdb_id."""
+    show_title = _extract_show_title(query)
+    if not show_title or len(show_title) < 2:
+        return []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     try:
-        url = f"https://eztvx.to/api/get-torrents?limit=100&search={urllib.parse.quote(query)}"
+        tv_url = f"https://api.tvmaze.com/singlesearch/shows?q={urllib.parse.quote(show_title)}"
+        with urllib.request.urlopen(urllib.request.Request(tv_url, headers=headers), timeout=3) as tv_resp:
+            tv_data = json.loads(tv_resp.read().decode("utf-8"))
+        imdb_raw = (tv_data.get("externals") or {}).get("imdb") or ""
+        imdb_digits = re.sub(r"\D", "", str(imdb_raw))
+        if not imdb_digits:
+            return []
+
+        url = f"https://eztvx.to/api/get-torrents?imdb_id={imdb_digits}&limit=100"
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            torrents = data.get("torrents") or []
+            results = []
+            for item in torrents:
+                name = item.get("filename") or item.get("title") or "Unknown"
+                info_hash = (item.get("hash") or "").strip().lower()
+                if not info_hash:
+                    continue
+                score = calculate_match_score(name, query, target_episode)
+                if score > 0:
+                    results.append({
+                        "name": name,
+                        "info_hash": info_hash,
+                        "seeders": int(item.get("seeds", 0) or 0),
+                        "leechers": int(item.get("peers", 0) or 0),
+                        "size": int(item.get("size_bytes", 0) or 0),
+                        "score": score,
+                        "source": "EZTV",
+                    })
+            return results
+    except Exception:
+        pass
+    return []
+
+def fetch_torrents_csv(query, target_episode=None):
+    """Query TorrentsCSV public JSON index."""
+    try:
+        url = f"https://torrents-csv.com/service/search?q={urllib.parse.quote(query)}&size=100"
         req = urllib.request.Request(
             url,
             headers={
@@ -283,11 +391,10 @@ def fetch_eztv(query, target_episode=None):
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            torrents = data.get("torrents", [])
             results = []
-            for item in torrents:
-                name = item.get("filename") or item.get("title") or "Unknown"
-                info_hash = (item.get("hash") or "").lower()
+            for item in data.get("torrents") or []:
+                name = item.get("name") or "Unknown"
+                info_hash = (item.get("infohash") or "").strip().lower()
                 if not info_hash:
                     continue
                 score = calculate_match_score(name, query, target_episode)
@@ -295,9 +402,59 @@ def fetch_eztv(query, target_episode=None):
                     results.append({
                         "name": name,
                         "info_hash": info_hash,
-                        "seeders": int(item.get("seeds", 0)),
-                        "size": int(item.get("size_bytes", 0)),
+                        "seeders": int(item.get("seeders", 0) or 0),
+                        "leechers": int(item.get("leechers", 0) or 0),
+                        "size": int(item.get("size_bytes", 0) or 0),
                         "score": score,
+                        "source": "TorrentsCSV",
+                    })
+            return results
+    except Exception:
+        pass
+    return []
+
+def fetch_knaben(query, target_episode=None):
+    """Query Knaben open JSON meta-search API sorted by seeders."""
+    try:
+        payload = json.dumps({
+            "query": query,
+            "size": 100,
+            "order_by": "seeders",
+            "order_direction": "desc",
+            "hide_unsafe": True,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.knaben.org/v1",
+            data=payload,
+            headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results = []
+            for item in data.get("hits") or []:
+                name = item.get("title") or "Unknown"
+                info_hash = (item.get("hash") or "").strip().lower()
+                magnet = item.get("magnetUrl") or ""
+                if not info_hash and "btih:" in magnet.lower():
+                    m = re.search(r"btih:([a-fA-F0-9]{40})", magnet)
+                    if m:
+                        info_hash = m.group(1).lower()
+                if not info_hash:
+                    continue
+                score = calculate_match_score(name, query, target_episode)
+                if score > 0:
+                    results.append({
+                        "name": name,
+                        "info_hash": info_hash,
+                        "seeders": int(item.get("seeders", 0) or 0),
+                        "leechers": int(item.get("peers", 0) or 0),
+                        "size": int(item.get("bytes", 0) or 0),
+                        "score": score,
+                        "source": "Knaben",
                     })
             return results
     except Exception:
@@ -367,10 +524,10 @@ def fetch_yts(query, target_episode=None):
     return []
 
 def fetch_nyaa(query, target_episode=None):
-    """Query Nyaa anime RSS feed."""
+    """Query Nyaa RSS feed across all categories."""
     nyaa_ns = "{https://nyaa.si/xmlns/nyaa}"
     try:
-        url = f"https://nyaa.si/?page=rss&q={urllib.parse.quote(query)}&c=1_0&f=0"
+        url = f"https://nyaa.si/?page=rss&q={urllib.parse.quote(query)}&c=0_0&f=0"
         req = urllib.request.Request(
             url,
             headers={
@@ -793,14 +950,17 @@ def calculate_rank_score(item):
             base *= 0.35
     return base
 
-def search_torrents(query, target_episode=None, min_seeds=2, probe_top=5, no_probe=False):
+def _query_all_providers(q, target_episode=None):
     all_results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
         futures = [
-            executor.submit(fetch_apibay, query, target_episode),
-            executor.submit(fetch_solidtorrents, query, target_episode),
-            executor.submit(fetch_yts, query, target_episode),
-            executor.submit(fetch_nyaa, query, target_episode),
+            executor.submit(fetch_apibay, q, target_episode),
+            executor.submit(fetch_solidtorrents, q, target_episode),
+            executor.submit(fetch_torrents_csv, q, target_episode),
+            executor.submit(fetch_yts, q, target_episode),
+            executor.submit(fetch_nyaa, q, target_episode),
+            executor.submit(fetch_eztv, q, target_episode),
+            executor.submit(fetch_knaben, q, target_episode),
         ]
         for f in concurrent.futures.as_completed(futures):
             try:
@@ -809,6 +969,14 @@ def search_torrents(query, target_episode=None, min_seeds=2, probe_top=5, no_pro
                     all_results.extend(res)
             except Exception:
                 pass
+    return all_results
+
+def search_torrents(query, target_episode=None, min_seeds=2, probe_top=5, no_probe=False):
+    variants = generate_search_variants(query)
+    all_results = _query_all_providers(variants[0], target_episode)
+    if len(all_results) < 3 and len(variants) > 1:
+        for alt_q in variants[1:]:
+            all_results.extend(_query_all_providers(alt_q, target_episode))
 
     merged = {}
     for item in all_results:
