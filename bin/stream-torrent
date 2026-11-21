@@ -15,23 +15,18 @@ import urllib.parse
 import shutil
 from pathlib import Path
 
-# High-reliability tier-1 public trackers
+# Verified live tier-1 public trackers
 PUBLIC_TRACKERS = [
     "udp://tracker.opentrackr.org:1337/announce",
     "udp://open.stealth.si:80/announce",
-    "udp://tracker.torrent.eu.org:451/announce",
-    "udp://tracker.openbittorrent.com:6969/announce",
-    "http://tracker.openbittorrent.com:80/announce",
-    "udp://opentracker.i2p.rocks:6969/announce",
-    "udp://tracker.internetwarriors.net:1337/announce",
+    "udp://open.demonii.com:1337/announce",
+    "udp://tracker.dler.org:6969/announce",
+    "udp://tracker.bittor.pw:1337/announce",
     "udp://explodie.org:6969/announce",
-    "udp://tracker.cyberia.is:6969/announce",
-    "udp://tracker.moeking.me:6969/announce",
-    "udp://p4p.arenabg.com:1337/announce",
-    "udp://movies.zsw.ca:6969/announce",
-    "wss://tracker.openwebtorrent.com",
-    "wss://tracker.btorrent.xyz",
-    "wss://tracker.webtorrent.dev",
+    "udp://open.tracker.cl:1337/announce",
+    "udp://tracker.internetwarriors.net:1337/announce",
+    "http://nyaa.tracker.wf:7777/announce",
+    "https://tracker.tamersunion.org:443/announce",
 ]
 
 CACHE_DIRS = [
@@ -194,14 +189,18 @@ def main():
         elif interactive_mode:
             print("\033[1;32m🎯 Season Pack Mode:\033[0m If this is a season pack, episode selection will appear momentarily.")
 
+    rc = 0
     try:
-        subprocess.run(cmd)
+        res = subprocess.run(cmd)
+        rc = res.returncode
     except KeyboardInterrupt:
-        pass
+        rc = 0
     finally:
         if not custom_out:
             purge_cache(False)
             print("\n\033[1;32m🧹 Cache cleared successfully.\033[0m")
+    if rc != 0:
+        sys.exit(rc)
 
 if __name__ == "__main__":
     main()
