@@ -103,6 +103,7 @@ mkdir -p "$REPO_DIR/config/Code/User"
 # Systemd user services
 mkdir -p "$REPO_DIR/config/systemd/user"
 [[ -f "$HOME_DIR/.config/systemd/user/surrey-rentals.service" ]] && cp -f "$HOME_DIR/.config/systemd/user/surrey-rentals.service" "$REPO_DIR/config/systemd/user/surrey-rentals.service"
+[[ -f "$HOME_DIR/.config/systemd/user/bisvo.service" ]] && cp -f "$HOME_DIR/.config/systemd/user/bisvo.service" "$REPO_DIR/config/systemd/user/bisvo.service"
 
 # Git config (sanitize gh credential helper to be system-agnostic)
 if [[ -f "$HOME_DIR/.config/git/config" ]]; then

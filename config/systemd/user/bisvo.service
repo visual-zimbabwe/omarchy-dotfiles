@@ -1,0 +1,15 @@
+[Unit]
+Description=Bisvo Harare Residential Stands Finder Hourly Watcher
+After=graphical-session.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/juwimana/bisvo/run.sh watch --interval 60
+WorkingDirectory=/home/juwimana/bisvo
+Restart=always
+RestartSec=60
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

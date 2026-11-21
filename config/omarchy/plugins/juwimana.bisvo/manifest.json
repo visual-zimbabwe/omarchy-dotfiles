@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "juwimana.bisvo",
+  "name": "Bisvo",
+  "version": "1.0.0",
+  "author": "juwimana",
+  "license": "MIT",
+  "description": "Hourly Harare residential stands finder (<= 500 m²) across Mainway Meadows, Msasa Park, Southerton, and Braeside",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Bisvo",
+    "description": "Monitor residential stands <= 500 m² from reliable agency portals in Mainway Meadows, Msasa Park, Southerton, and Braeside",
+    "category": "Info",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
