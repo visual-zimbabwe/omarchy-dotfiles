@@ -76,7 +76,8 @@ Panel {
   function formatUsd(val) {
     var num = Number(val || 0)
     if (!isFinite(num) || num <= 0) return strings.t("card.poa")
-    return "$" + I18n.formatNumber(Math.round(num), 0)
+    var rounded = Math.round(num)
+    return "$" + String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
   }
 
   function formatSize(val) {
@@ -447,9 +448,7 @@ Panel {
           meta: root.sanitizePlainText(
             root.isScanning
               ? strings.t("hero.scanning")
-              : strings.t("hero.meta")
-                  .arg(I18n.formatNumber(Math.round(root.configData.max_sqm || 500), 0))
-                  .arg("5 Agency Portals")
+              : strings.t("hero.meta").arg(I18n.formatNumber(Math.round(root.configData.max_sqm || 500), 0))
           )
           foreground: root.fg
           fontFamily: root.fontFamily
