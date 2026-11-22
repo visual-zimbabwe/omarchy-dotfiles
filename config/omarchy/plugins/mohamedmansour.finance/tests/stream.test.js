@@ -346,3 +346,62 @@ test("SetupAlertScanner seeds on hydration without firing, fires once on live RT
     scanner.dispose()
   }
 })
+
+test("OffThreadCandleCache persists fetchedAt and SetupAlertScanner rehydrates stale prior-week cache on weekends", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omafinance-stale-cache-"))
+  try {
+    const c1 = new Stream.OffThreadCandleCache(tmpDir)
+    await c1.load()
+    const priorFri = Date.UTC(2026, 10, 13, 14, 30) / 1000
+    const prevWeek = Date.UTC(2026, 10, 6, 14, 30) / 1000
+    const stale1D = [
+      { timestamp: prevWeek, open: 200, high: 210, low: 170, close: 180, volume: 100 },
+      { timestamp: priorFri, open: 178, high: 188, low: 173, close: 184, volume: 100 }
+    ]
+    const savedAt = Date.UTC(2026, 10, 13, 21, 10)
+    c1.put("DDOG_1D", stale1D, null, savedAt)
+    await c1.flush()
+
+    const c2 = new Stream.OffThreadCandleCache(tmpDir)
+    await c2.load()
+    assert.equal(c2.getFetchedAt("DDOG_1D"), savedAt)
+
+    const fetchedCalls = []
+    const sunNov22 = new Date("2026-11-22T22:55:00Z")
+    const freshFri = Date.UTC(2026, 10, 20, 14, 30) / 1000
+    const fresh1D = [
+      ...stale1D,
+      { timestamp: freshFri, open: 182, high: 182, low: 156, close: 157, volume: 120 }
+    ]
+    const scanner = new Stream.SetupAlertScanner({
+      cache: c2,
+      now: () => sunNov22,
+      resolveHoldings: async () => ({ holdings: [] }),
+      fetchChart: async (sym, tf) => {
+        fetchedCalls.push(`${sym}_${tf}`)
+        if (sym === "DDOG" && tf === "1D") return { symbol: "DDOG", candles: fresh1D }
+        return null
+      }
+    })
+    try {
+      await scanner.setConfig(["DDOG"], {}, true)
+      await new Promise(r => setTimeout(r, 40))
+      assert.ok(fetchedCalls.includes("DDOG_1D"), "stale prior-week 1D must be refetched on weekend")
+      const st = scanner.symbolState.get("DDOG")
+      assert.equal(st.candles["1D"].length, 3)
+      // External chart update (e.g. from GridWindow) updates tracked state immediately
+      scanner.onExternalChartUpdate("DDOG", "1D", {
+        symbol: "DDOG",
+        candles: [
+          ...fresh1D.slice(0, 2),
+          { timestamp: freshFri, open: 182, high: 182, low: 155, close: 155.5, volume: 130 }
+        ]
+      })
+      assert.equal(st.candles["1D"][2].close, 155.5)
+    } finally {
+      scanner.dispose()
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  }
+})

@@ -28,19 +28,19 @@
   "detailRange": "1M",
   "gridMode": "2x2",
   "gridSync": {
-    "symbol": true,
-    "timeframe": false,
-    "crosshair": false,
-    "time": false,
     "broadening": true,
-    "setupLines": true
+    "crosshair": false,
+    "setupLines": true,
+    "symbol": true,
+    "time": false,
+    "timeframe": false
   },
   "gridSymbols": [
-    "AMD",
-    "AMD",
-    "AMD",
-    "AMD",
-    "AMD"
+    "DDOG",
+    "DDOG",
+    "DDOG",
+    "DDOG",
+    "DDOG"
   ],
   "gridSplits": {
     "2x2": {
@@ -238,14 +238,17 @@
   ],
   "gridZooms": [
     95,
-    125,
-    20,
+    42,
+    35,
     20,
     8
   ],
   "discordWebhook": "https://discord.com/api/webhooks/1555025989363310644/M0JepOpRsNNPbR_Ykk_-kgxc8plFo2Mfp7j0t_-Y7dv92osFqVITTKc5NcJ_qYA2v_TR",
   "alertSources": [
-    "SMH"
+    "SMH",
+    "XLK",
+    "@ENERGY",
+    "@MARKET"
   ],
   "alertsAutoOpen": true,
   "alertLog": [

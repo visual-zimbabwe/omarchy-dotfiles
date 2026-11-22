@@ -6190,6 +6190,28 @@ function isUsEquitySessionSymbol(symbol) {
   return true;
 }
 
+function expectedLastSessionEt(nowMs, sched) {
+  var offsetMs = (isUsDstUtc(nowMs) ? -4 : -5) * 3600000;
+  var et = new Date(nowMs + offsetMs);
+  var day = et.getUTCDay();
+  var deltaDays = 0;
+  if (day === 6) {
+    deltaDays = -1;
+  } else if (day === 0) {
+    deltaDays = -2;
+  } else if (sched.mins < sched.openMins) {
+    deltaDays = (day === 1) ? -3 : -1;
+  }
+  var target = new Date(Date.UTC(et.getUTCFullYear(), et.getUTCMonth(), et.getUTCDate() + deltaDays, 12, 0, 0));
+  var m = target.getUTCMonth() + 1;
+  var d = target.getUTCDate();
+  return {
+    dateStr: target.getUTCFullYear() + "-" + (m < 10 ? "0" : "") + m + "-" + (d < 10 ? "0" : "") + d,
+    weekStart: marketWeekStartEt(Math.floor(target.getTime() / 1000)),
+    closeMins: getUsSessionSchedule(target).closeMins
+  };
+}
+
 function isCandleSeriesStale(candles, symbol, rangeKey, nowDate, fetchedAtMs) {
   if (!isArrayLike(candles) || candles.length === 0) return true;
   var last = candles[candles.length - 1];
@@ -6254,24 +6276,46 @@ function isCandleSeriesStale(candles, symbol, rangeKey, nowDate, fetchedAtMs) {
     return false;
   }
 
-  // Outside RTH on a weekday after market close: stale if missing today's regular session
-  if (!sched.isWeekend && sched.mins >= sched.closeMins) {
-    if (isIntraday || tf === "1D" || tf === "D" || tf === "1d" || tf === "day") {
-      return lastEt < curEt;
+  // Outside RTH (weekday post-close, weekends, and weekday pre-market):
+  // Validate against the most recent completed weekday regular session.
+  var expected = expectedLastSessionEt(nowMs, sched);
+
+  if (fetchedMs !== null && fetchedMs > 0) {
+    var fetchedEt = marketDateEt(fetchedMs / 1000);
+    if (fetchedEt > expected.dateStr) {
+      return false;
     }
-    if (fetchedMs !== null && fetchedMs > 0 && marketDateEt(fetchedMs / 1000) === curEt) {
+    if (fetchedEt === expected.dateStr) {
       var fetchedSched = getUsSessionSchedule(new Date(fetchedMs));
-      if (fetchedSched.mins >= sched.closeMins) return false;
+      if (fetchedSched.mins >= fetchedSched.closeMins) {
+        return false;
+      }
+      return true;
     }
-    if (tf === "1W" || tf === "W" || tf === "1w" || tf === "week") {
-      return marketWeekStartEt(lastTs) < marketWeekStartEt(nowSec);
+    return true;
+  }
+
+  if (isIntraday) {
+    if (lastEt < expected.dateStr) return true;
+    if (lastEt === expected.dateStr) {
+      var lastOffsetMs = (isUsDstUtc(lastTs * 1000) ? -4 : -5) * 3600000;
+      var lastEtDt = new Date(lastTs * 1000 + lastOffsetMs);
+      var lastEtMins = lastEtDt.getUTCHours() * 60 + lastEtDt.getUTCMinutes();
+      var barMins = tfNorm === "60" ? 60 : (tfNorm === "30" ? 30 : (tfNorm === "15" ? 15 : (tfNorm === "5" ? 5 : 1)));
+      var finalStartMins = expected.closeMins - Math.min(30, barMins);
+      if (lastEtMins < finalStartMins) return true;
     }
-    if (tf === "1M" || tf === "M") {
-      return lastEt.slice(0, 7) < curEt.slice(0, 7);
-    }
-    if (tf === "1Y" || tf === "Y") {
-      return lastEt.slice(0, 4) < curEt.slice(0, 4);
-    }
+    return false;
+  }
+  if (tf === "1D" || tf === "D" || tf === "1d" || tf === "day") {
+    return lastEt < expected.dateStr;
+  }
+  if (tf === "1W" || tf === "W" || tf === "1w" || tf === "week" ||
+      tf === "1M" || tf === "M" ||
+      tf === "1Y" || tf === "Y") {
+    // HTF bar timestamps are anchored to period start (Monday / 1st / Jan 1), so without a
+    // known post-close fetchedAt timestamp we cannot trust mid-period cached bars.
+    return true;
   }
 
   return false;
