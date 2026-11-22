@@ -63,6 +63,62 @@ function normalizeTimeframeList(raw) {
 
 var MIN_BAR_COUNT = 1
 var DEFAULT_ANALYSIS_BAR_COUNT = 8
+var DEFAULT_RIGHT_OFFSET_BARS = 9
+
+function defaultRightOffsetBars(vCount) {
+  var c = isFinite(vCount) ? Math.floor(vCount) : 0
+  if (c <= 2) return 0
+  return Math.min(DEFAULT_RIGHT_OFFSET_BARS, Math.max(1, Math.floor(c * 0.2)))
+}
+
+function minVisibleChartBars(total, vCount) {
+  var t = isFinite(total) ? Math.max(0, Math.floor(total)) : 0
+  if (t <= 1) return t
+  var c = isFinite(vCount) ? Math.max(1, Math.floor(vCount)) : t
+  return Math.min(t, Math.max(2, Math.round(c * 0.15)))
+}
+
+function maxChartViewStart(total, vCount) {
+  var t = isFinite(total) ? Math.max(0, Math.floor(total)) : 0
+  if (t <= 1) return 0
+  return Math.max(0, t - minVisibleChartBars(t, vCount))
+}
+
+// Resolve horizontal candlestick viewport with TradingView-style right-side whitespace.
+// rightOffsetBars < 0 uses the default (~9 bar) right margin scaled safely for short series.
+function resolveHorizontalViewport(total, viewCount, defaultCount, viewStart, followLatest, rightOffsetBars) {
+  var t = isFinite(total) ? Math.max(0, Math.floor(total)) : 0
+  if (t === 0) {
+    return { vStart: 0, vCount: 0, flushStart: 0, maxStart: 0, minVisibleBars: 0, rightOffsetBars: 0 }
+  }
+  var defC = (isFinite(defaultCount) && defaultCount > 0) ? Math.min(t, Math.floor(defaultCount)) : t
+  var vCount = (isFinite(viewCount) && viewCount > 0 && viewCount < t) ? Math.max(MIN_BAR_COUNT, Math.floor(viewCount)) : defC
+  var flushStart = Math.max(0, t - vCount)
+  var minVis = minVisibleChartBars(t, vCount)
+  var maxStart = Math.max(0, t - minVis)
+  var maxRight = Math.max(0, maxStart - flushStart)
+  var desiredRight = (isFinite(rightOffsetBars) && rightOffsetBars >= 0)
+    ? Math.floor(rightOffsetBars)
+    : defaultRightOffsetBars(vCount)
+  var clampedRight = Math.max(0, Math.min(maxRight, desiredRight))
+
+  var vStart
+  if (followLatest) {
+    vStart = Math.min(maxStart, flushStart + clampedRight)
+  } else {
+    var rawStart = isFinite(viewStart) ? Math.floor(viewStart) : flushStart
+    vStart = Math.max(0, Math.min(maxStart, rawStart))
+  }
+  var effectiveRight = Math.max(0, vStart - flushStart)
+  return {
+    vStart: vStart,
+    vCount: vCount,
+    flushStart: flushStart,
+    maxStart: maxStart,
+    minVisibleBars: minVis,
+    rightOffsetBars: effectiveRight
+  }
+}
 
 var PRICE_SCALE_MIN_LOG_SPAN = 0.0005
 var PRICE_SCALE_MAX_LOG_SPAN = 14
@@ -8935,6 +8991,11 @@ if (typeof module !== "undefined") {
     stratSpread: stratSpread,
     MIN_BAR_COUNT: MIN_BAR_COUNT,
     DEFAULT_ANALYSIS_BAR_COUNT: DEFAULT_ANALYSIS_BAR_COUNT,
+    DEFAULT_RIGHT_OFFSET_BARS: DEFAULT_RIGHT_OFFSET_BARS,
+    defaultRightOffsetBars: defaultRightOffsetBars,
+    minVisibleChartBars: minVisibleChartBars,
+    maxChartViewStart: maxChartViewStart,
+    resolveHorizontalViewport: resolveHorizontalViewport,
     clampBarCount: clampBarCount,
     PRICE_SCALE_MIN_LOG_SPAN: PRICE_SCALE_MIN_LOG_SPAN,
     PRICE_SCALE_MAX_LOG_SPAN: PRICE_SCALE_MAX_LOG_SPAN,

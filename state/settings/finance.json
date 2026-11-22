@@ -28,12 +28,12 @@
   "detailRange": "1M",
   "gridMode": "2x2",
   "gridSync": {
-    "broadening": true,
-    "crosshair": false,
-    "setupLines": true,
     "symbol": false,
+    "timeframe": false,
+    "crosshair": false,
     "time": false,
-    "timeframe": false
+    "broadening": true,
+    "setupLines": true
   },
   "gridSymbols": [
     "SPY",
@@ -693,7 +693,8 @@
     "GOOGL:60:1795206600:SHORT": "TARGET_HIT",
     "SPY:60:1795199400:CONFLICT": "TARGET_HIT",
     "SPY:60:1795203000:SHORT": "TARGET_HIT",
-    "SPY:30:1795204800:SHORT": "TARGET_HIT"
+    "SPY:30:1795204800:SHORT": "TARGET_HIT",
+    "SPY:30:1795204800:CONFLICT": "TARGET_HIT"
   },
   "alertLog": [
     {

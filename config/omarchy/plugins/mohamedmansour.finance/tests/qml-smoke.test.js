@@ -509,7 +509,7 @@ test("candlestick chart supports 30m timeframe, followLatest auto-scroll, and dr
 
   assert.match(cell, /model:\s*\["30",\s*"60",\s*"1D",\s*"1W",\s*"1M",\s*"1Y"\]/)
   assert.match(chart, /property bool followLatest:\s*true/)
-  assert.match(chart, /var vStart = root\.followLatest \? maxStart : Math\.max\(0, Math\.min\(maxStart, root\.viewStart\)\)/)
+  assert.match(chart, /Model\.resolveHorizontalViewport\(total,\s*root\.viewCount,\s*defaultCount,\s*root\.viewStart,\s*root\.followLatest,\s*root\.rightOffsetBars\)/)
   assert.match(chart, /property var priceLevels:\s*\[\]/)
   assert.match(chart, /function resolveLevelEndpoints\(lvl,\s*g\)/)
   assert.match(chart, /Model\.resolveLevelAnchorIndex\(lvl,\s*all,\s*root\.rangeKey\)/)
@@ -838,7 +838,7 @@ test("charts support 1-bar minimum zoom and interactive price scale (cursor, dra
   const sector = fs.readFileSync(source("SectorAnalysisWindow.qml"), "utf8")
 
   // Minimum bars = Model.MIN_BAR_COUNT (1) across chart, GridWindow, and SectorAnalysisWindow (no candle width cap)
-  assert.match(chart, /var minBars = Model\.MIN_BAR_COUNT;/)
+  assert.match(chart, /Math\.max\(Model\.MIN_BAR_COUNT,/)
   assert.match(chart, /root\.configuredZoom >= Model\.MIN_BAR_COUNT/)
   assert.match(chart, /var candleW = slotW >= 7 \? Math\.max\(1, slotW - 4\)/)
   assert.match(grid, /root\.cellZooms\[index\] >= Model\.MIN_BAR_COUNT/)
@@ -943,4 +943,11 @@ test("GridWindow automatic Strat setup lines toggle, solid rendering, and strict
   assert.match(chart, /onSetupLinesChanged:\s*refreshGeometry\(\)/)
   assert.match(chart, /Model\.setupLineColor\(sLine\.timeframe, sLine\.kind, slIsLight\)/)
   assert.match(chart, /ctx\.setLineDash\(\[\]\)/)
+
+  // CandlestickChart supports TradingView-style right-side whitespace & unrestricted left/right horizontal panning
+  assert.match(chart, /property int rightOffsetBars:\s*-1/)
+  assert.match(chart, /Model\.resolveHorizontalViewport\(/)
+  assert.match(chart, /var slotW = innerW \/ Math\.max\(1, vCount\);/)
+  assert.match(chart, /if \(g\.maxStart > 0\)/)
+  assert.match(chart, /if \(idx >= g\.candles\.length\)/)
 })

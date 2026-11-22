@@ -5421,3 +5421,45 @@ test("computeTriggeredSetupLines enforces trigger gating, bar lifetime, cascade,
   const savedOn = Model.serializeState(["AAPL"], [], "1D", "2x2", { symbol: true, timeframe: false, crosshair: true, time: true, broadening: false, setupLines: true })
   assert.equal(Model.parseState(savedOn).gridSync.setupLines, true)
 })
+
+test("resolveHorizontalViewport supports TradingView-style ~9-bar default right margin and free left/right panning", () => {
+  // 1. Default ~9-bar right margin on standard 250-bar daily chart (defaultCount=140)
+  const vpStd = Model.resolveHorizontalViewport(250, -1, 140, 0, true, -1)
+  assert.equal(vpStd.vCount, 140)
+  assert.equal(vpStd.flushStart, 110)
+  assert.equal(vpStd.rightOffsetBars, Model.DEFAULT_RIGHT_OFFSET_BARS)
+  assert.equal(vpStd.vStart, 110 + Model.DEFAULT_RIGHT_OFFSET_BARS)
+  assert.ok(vpStd.maxStart > vpStd.vStart, "user can drag further left to expand right whitespace")
+
+  // 2. Dragging further left (e.g. 40 bars of right whitespace) works and is preserved on new bar arrival
+  const vpDraggedLeft = Model.resolveHorizontalViewport(250, -1, 140, 150, true, 40)
+  assert.equal(vpDraggedLeft.vStart, 150)
+  assert.equal(vpDraggedLeft.rightOffsetBars, 40)
+  const vpNextBar = Model.resolveHorizontalViewport(251, -1, 140, 150, true, 40)
+  assert.equal(vpNextBar.vStart, 151)
+  assert.equal(vpNextBar.rightOffsetBars, 40)
+
+  // 3. Dragging right back to flush (0 margin) and into older history (vStart < flushStart)
+  const vpFlush = Model.resolveHorizontalViewport(250, -1, 140, 110, true, 0)
+  assert.equal(vpFlush.vStart, 110)
+  assert.equal(vpFlush.rightOffsetBars, 0)
+  const vpHist = Model.resolveHorizontalViewport(250, -1, 140, 30, false, 0)
+  assert.equal(vpHist.vStart, 30)
+  assert.equal(vpHist.rightOffsetBars, 0)
+
+  // 4. Full-history chart (e.g. 40 monthly bars, vCount === total): still pans left into right margin and back to 0
+  const vpMonthly = Model.resolveHorizontalViewport(40, -1, 40, 0, true, -1)
+  assert.equal(vpMonthly.flushStart, 0)
+  assert.equal(vpMonthly.rightOffsetBars, 8) // floor(40 * 0.2) = 8
+  assert.equal(vpMonthly.vStart, 8)
+  assert.ok(vpMonthly.maxStart >= 30)
+
+  // 5. Tiny series (10 yearly bars, 1 bar) scale safely without hiding all candles
+  const vpTiny = Model.resolveHorizontalViewport(10, -1, 10, 0, true, -1)
+  assert.equal(vpTiny.rightOffsetBars, 2)
+  assert.equal(vpTiny.vStart, 2)
+  const vpSingle = Model.resolveHorizontalViewport(1, -1, 1, 0, true, -1)
+  assert.equal(vpSingle.vStart, 0)
+  assert.equal(vpSingle.maxStart, 0)
+  assert.equal(vpSingle.rightOffsetBars, 0)
+})
