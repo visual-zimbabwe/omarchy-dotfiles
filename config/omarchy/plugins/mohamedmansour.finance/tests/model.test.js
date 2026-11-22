@@ -1728,6 +1728,76 @@ test("setup alert helpers normalize sources, classify Reversal vs Continuation s
   assert.deepEqual(rowSymbols({ sortKey: "1D", sortAsc: false }), ["AAPL", "MSFT", "NVDA"])
   assert.deepEqual(rowSymbols({ sortKey: "1D", sortAsc: true }), ["MSFT", "AAPL", "NVDA"])
 
+  // Multi-column sort locking: lock 1M first, then sub-sort ties by 1W, then lock 1W and sub-sort by ticker
+  const chainedItems = [
+    Object.assign({}, hit60, {
+      key: "TSLA:60:1:LONG:2d-1-2u",
+      symbol: "TSLA",
+      inForce: true,
+      triggeredAt: 100,
+      baskets: ["SMH"],
+      scenarios: { "1M": { sc: "2U", colorTone: "up" }, "1W": { sc: "1", colorTone: "up" }, "1D": { sc: "2U", colorTone: "up" } }
+    }),
+    Object.assign({}, hit60, {
+      key: "NVDA:60:1:LONG:2d-1-2u",
+      symbol: "NVDA",
+      inForce: true,
+      triggeredAt: 200,
+      baskets: ["SMH"],
+      scenarios: { "1M": { sc: "2U", colorTone: "up" }, "1W": { sc: "3", colorTone: "up" }, "1D": { sc: "2U", colorTone: "up" } }
+    }),
+    Object.assign({}, hit60, {
+      key: "AMD:60:1:LONG:2d-1-2u",
+      symbol: "AMD",
+      inForce: true,
+      triggeredAt: 300,
+      baskets: ["SMH"],
+      scenarios: { "1M": { sc: "2U", colorTone: "up" }, "1W": { sc: "3", colorTone: "up" }, "1D": { sc: "1", colorTone: "down" } }
+    }),
+    Object.assign({}, hit60, {
+      key: "AVGO:60:1:LONG:2d-1-2u",
+      symbol: "AVGO",
+      inForce: true,
+      triggeredAt: 400,
+      baskets: ["SMH"],
+      scenarios: { "1M": { sc: "3", colorTone: "up" }, "1W": { sc: "1", colorTone: "down" }, "1D": { sc: "1", colorTone: "down" } }
+    })
+  ]
+  const chainedSyms = (specs) => Model.buildGroupedAlertWatchlist(chainedItems, { sortSpecs: specs }).rows.filter(r => r.kind === "row").map(r => r.item.symbol)
+
+  // Step 1: click 1M, lock 1M, then click 1W
+  let specs = Model.applyAlertSortClick([], "1M")
+  assert.deepEqual(specs, [{ key: "1M", asc: false, locked: false }])
+  specs = Model.toggleAlertSortLock(specs, "1M")
+  assert.deepEqual(specs, [{ key: "1M", asc: false, locked: true }])
+  specs = Model.applyAlertSortClick(specs, "1W")
+  assert.deepEqual(specs, [
+    { key: "1M", asc: false, locked: true },
+    { key: "1W", asc: false, locked: false }
+  ])
+  // AVGO has 1M=3g (#1); among 1M=2Ug ties, AMD & NVDA have 1W=3g (AMD newer trigger), TSLA has 1W=1g
+  assert.deepEqual(chainedSyms(specs), ["AVGO", "AMD", "NVDA", "TSLA"])
+
+  // Step 2: lock 1W too, then click ticker (asc A->Z) to sort within 1M+1W ties
+  specs = Model.toggleAlertSortLock(specs, "1W")
+  specs = Model.applyAlertSortClick(specs, "ticker")
+  assert.deepEqual(chainedSyms(specs), ["AVGO", "AMD", "NVDA", "TSLA"])
+  // Flip ticker to desc (Z->A): NVDA before AMD while AVGO stays #1 (1M locked) and TSLA stays last (1W locked)
+  specs = Model.applyAlertSortClick(specs, "ticker")
+  assert.deepEqual(chainedSyms(specs), ["AVGO", "NVDA", "AMD", "TSLA"])
+
+  // Step 3: click locked 1M header to flip 1M to asc (2Ug before 3g) without losing locks
+  specs = Model.applyAlertSortClick(specs, "1M")
+  assert.equal(specs[0].locked, true)
+  assert.equal(specs[0].asc, true)
+  assert.deepEqual(chainedSyms(specs), ["NVDA", "AMD", "TSLA", "AVGO"])
+
+  // Step 4: unlock 1M promotes 1W to priority #1
+  specs = Model.toggleAlertSortLock(specs, "1M")
+  assert.equal(specs[0].key, "1W")
+  assert.equal(specs[0].locked, true)
+  assert.deepEqual(chainedSyms(specs), ["NVDA", "AMD", "TSLA", "AVGO"])
+
   // inForceOnly filter hides pulled-back setups
   const filteredOut = Model.buildGroupedAlertWatchlist([hit60Pb], { inForceOnly: true })
   assert.equal(filteredOut.totalCount, 0)

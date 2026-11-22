@@ -24,8 +24,13 @@ FloatingWindow {
     property string tfFilter: "ALL"
     property bool inForceOnly: false
     property string searchQuery: ""
-    property string sortKey: "inForce"
-    property bool sortAsc: false
+    property var sortSpecs: [
+        {
+            key: "inForce",
+            asc: false,
+            locked: false
+        }
+    ]
     property var collapsedGroups: ({})
     property double clockNowMs: Date.now()
     property string hoveredRowId: ""
@@ -57,10 +62,36 @@ FloatingWindow {
     readonly property string fontFamily: Style.font.family
     readonly property bool isLightBg: Model.isLightColor(Color.background)
 
-    readonly property int tfColW: Style.space(44)
-    readonly property int inForceColW: Style.space(72)
+    readonly property int tfColW: Style.space(48)
+    readonly property int inForceColW: Style.space(76)
     readonly property var quickSources: ["@MARKET", "SMH", "XLK", "@ENERGY"]
     readonly property var scenarioTfs: ["30", "60", "1D", "1W", "1M"]
+
+    readonly property var lockedSortSpecs: {
+        var list = root.sortSpecs || [];
+        var out = [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] && list[i].locked === true)
+                out.push(list[i]);
+        }
+        return out;
+    }
+
+    readonly property bool hasLockedSort: lockedSortSpecs.length > 0
+
+    readonly property var activeUnlockedSpec: {
+        var list = root.sortSpecs || [];
+        for (var i = list.length - 1; i >= 0; i--) {
+            if (list[i] && list[i].locked !== true)
+                return list[i];
+        }
+        return null;
+    }
+
+    readonly property bool isDefaultSort: {
+        var list = root.sortSpecs || [];
+        return list.length === 1 && list[0].key === "inForce" && list[0].asc === false && list[0].locked !== true;
+    }
 
     readonly property var customSources: {
         var list = root.alertSources || [];
@@ -78,8 +109,7 @@ FloatingWindow {
             searchQuery: root.searchQuery,
             collapsed: root.collapsedGroups,
             sourceOrder: root.alertSources || [],
-            sortKey: root.sortKey,
-            sortAsc: root.sortAsc
+            sortSpecs: root.sortSpecs
         })
 
     readonly property bool allCollapsed: {
@@ -194,16 +224,65 @@ FloatingWindow {
         }
     }
 
-    function toggleSortColumn(key) {
+    function sortColumnLabel(key) {
+        if (key === "ticker")
+            return "TICKER";
+        if (key === "inForce")
+            return "IN-FORCE";
+        return String(key || "");
+    }
+
+    function sortSpecInfo(key) {
+        var list = root.sortSpecs || [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] && list[i].key === key) {
+                return {
+                    index: i,
+                    priority: i + 1,
+                    asc: list[i].asc === true,
+                    locked: list[i].locked === true
+                };
+            }
+        }
+        return null;
+    }
+
+    function sortHeaderSuffix(key) {
+        var info = root.sortSpecInfo(key);
+        if (!info)
+            return "";
+        var arrow = info.asc ? "↑" : "↓";
+        if (info.locked || root.hasLockedSort)
+            return " " + info.priority + arrow;
+        return " " + arrow;
+    }
+
+    function sortHeaderTooltip(key) {
+        var info = root.sortSpecInfo(key);
+        if (info && info.locked)
+            return "Locked sort #" + info.priority + " · Left-click: flip ↑/↓ · Right-click or Shift+click: unlock";
+        return "Left-click: sort/flip ↑/↓ · Right-click or Shift+click: lock sort";
+    }
+
+    function toggleSortColumn(key, lockToggle) {
         if (!key)
             return;
         root.clearRowHover("");
-        if (root.sortKey === key) {
-            root.sortAsc = !root.sortAsc;
-        } else {
-            root.sortKey = key;
-            root.sortAsc = (key === "ticker");
-        }
+        if (lockToggle === true)
+            root.sortSpecs = Model.toggleAlertSortLock(root.sortSpecs, key);
+        else
+            root.sortSpecs = Model.applyAlertSortClick(root.sortSpecs, key);
+    }
+
+    function resetSortSpecs() {
+        root.clearRowHover("");
+        root.sortSpecs = [
+            {
+                key: "inForce",
+                asc: false,
+                locked: false
+            }
+        ];
     }
 
     function syncHoveredRow() {
@@ -632,13 +711,153 @@ FloatingWindow {
                 }
             }
 
+            // Row 4: Chained Sort Lock Strip (lock a sort column, then sub-sort by another column)
+            Item {
+                id: sortBar
+                width: parent.width
+                height: Math.max(Style.space(26), sortFlow.implicitHeight + Style.space(6))
+
+                Flow {
+                    id: sortFlow
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.leftMargin: Style.space(12)
+                    anchors.rightMargin: Style.space(10)
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.space(5)
+
+                    Text {
+                        textFormat: Text.PlainText
+                        text: "SORT:"
+                        color: root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        font.bold: true
+                        height: Style.space(20)
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    Repeater {
+                        model: root.lockedSortSpecs
+
+                        Row {
+                            required property var modelData
+                            required property int index
+                            spacing: Style.space(4)
+
+                            Text {
+                                visible: parent.index > 0
+                                textFormat: Text.PlainText
+                                text: "›"
+                                color: root.dim
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            FinanceChipButton {
+                                iconText: "\uf023"
+                                text: (parent.index + 1) + ". " + root.sortColumnLabel(parent.modelData.key) + (parent.modelData.asc ? " ↑" : " ↓") + " ×"
+                                checked: true
+                                bordered: true
+                                foreground: root.foreground
+                                dimColor: root.dim
+                                accentColor: Color.accent
+                                fontFamily: root.fontFamily
+                                fontSize: Style.font.caption
+                                horizontalPadding: Style.space(6)
+                                verticalPadding: Style.space(1)
+                                tooltipText: "Locked sort #" + (parent.index + 1) + " · Click to unlock · Left-click column header to flip ↑/↓"
+                                onClicked: root.toggleSortColumn(parent.modelData.key, true)
+                            }
+                        }
+                    }
+
+                    Text {
+                        visible: root.hasLockedSort && root.activeUnlockedSpec !== null
+                        textFormat: Text.PlainText
+                        text: "›"
+                        color: root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        height: Style.space(20)
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    FinanceChipButton {
+                        visible: root.activeUnlockedSpec !== null
+                        text: root.activeUnlockedSpec ? ((root.hasLockedSort ? ((root.lockedSortSpecs.length + 1) + ". ") : "") + root.sortColumnLabel(root.activeUnlockedSpec.key) + (root.activeUnlockedSpec.asc ? " ↑" : " ↓")) : ""
+                        checked: false
+                        bordered: true
+                        foreground: root.foreground
+                        dimColor: root.dim
+                        fontFamily: root.fontFamily
+                        fontSize: Style.font.caption
+                        horizontalPadding: Style.space(6)
+                        verticalPadding: Style.space(1)
+                        tooltipText: "Active sort · Click to flip ↑/↓"
+                        onClicked: {
+                            if (root.activeUnlockedSpec)
+                                root.toggleSortColumn(root.activeUnlockedSpec.key, false);
+                        }
+                    }
+
+                    FinanceChipButton {
+                        id: lockActiveSortBtn
+                        visible: root.activeUnlockedSpec !== null
+                        iconText: "\uf023"
+                        text: "LOCK"
+                        checked: false
+                        bordered: true
+                        foreground: root.foreground
+                        dimColor: root.dim
+                        accentColor: Color.accent
+                        fontFamily: root.fontFamily
+                        fontSize: Style.font.caption
+                        horizontalPadding: Style.space(6)
+                        verticalPadding: Style.space(1)
+                        tooltipText: "Lock this sort column so clicking another column sub-sorts within it"
+                        onClicked: {
+                            if (root.activeUnlockedSpec)
+                                root.toggleSortColumn(root.activeUnlockedSpec.key, true);
+                        }
+                    }
+
+                    Text {
+                        visible: root.activeUnlockedSpec === null
+                        textFormat: Text.PlainText
+                        text: "+ click another column to sub-sort"
+                        color: root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        height: Style.space(20)
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    FinanceChipButton {
+                        visible: !root.isDefaultSort
+                        text: "RESET"
+                        checked: false
+                        bordered: true
+                        foreground: root.dim
+                        dimColor: root.dim
+                        fontFamily: root.fontFamily
+                        fontSize: Style.font.caption
+                        horizontalPadding: Style.space(6)
+                        verticalPadding: Style.space(1)
+                        tooltipText: "Clear all sort locks and reset to default In-Force order"
+                        onClicked: root.resetSortSpecs()
+                    }
+                }
+            }
+
             Rectangle {
                 width: parent.width
                 height: 1
                 color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
             }
 
-            // Sticky Thinkorswim Watchlist Column Header (Clickable Sortable Columns)
+            // Sticky Thinkorswim Watchlist Column Header (Clickable & Lockable Sort Columns)
             Rectangle {
                 id: columnHeader
                 width: parent.width
@@ -650,10 +869,22 @@ FloatingWindow {
                     anchors.left: parent.left
                     anchors.right: headerColsRow.left
                     height: parent.height
+                    readonly property var sortInfo: root.sortSpecInfo("ticker")
+                    QQC.ToolTip.visible: tickerSortHover.containsMouse
+                    QQC.ToolTip.delay: 500
+                    QQC.ToolTip.text: root.sortHeaderTooltip("ticker")
 
                     Rectangle {
                         anchors.fill: parent
-                        color: tickerSortHover.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06) : "transparent"
+                        color: (tickerHeaderCell.sortInfo && tickerHeaderCell.sortInfo.locked) ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, tickerSortHover.containsMouse ? 0.16 : 0.09) : (tickerSortHover.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06) : "transparent")
+                    }
+
+                    Rectangle {
+                        visible: tickerHeaderCell.sortInfo !== null
+                        anchors.bottom: parent.bottom
+                        width: parent.width
+                        height: Style.space(2)
+                        color: (tickerHeaderCell.sortInfo && tickerHeaderCell.sortInfo.locked) ? Color.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.35)
                     }
 
                     Text {
@@ -661,8 +892,8 @@ FloatingWindow {
                         anchors.leftMargin: Style.space(12)
                         anchors.verticalCenter: parent.verticalCenter
                         textFormat: Text.PlainText
-                        text: "TICKER" + (root.sortKey === "ticker" ? (root.sortAsc ? " ↑" : " ↓") : "")
-                        color: (root.sortKey === "ticker" || tickerSortHover.containsMouse) ? root.foreground : root.dim
+                        text: "TICKER" + root.sortHeaderSuffix("ticker")
+                        color: (tickerHeaderCell.sortInfo && tickerHeaderCell.sortInfo.locked) ? Color.accent : ((tickerHeaderCell.sortInfo || tickerSortHover.containsMouse) ? root.foreground : root.dim)
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.caption
                         font.bold: true
@@ -672,10 +903,14 @@ FloatingWindow {
                     MouseArea {
                         id: tickerSortHover
                         anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onEntered: root.clearRowHover("")
-                        onClicked: root.toggleSortColumn("ticker")
+                        onClicked: function (mouse) {
+                            var isLock = (mouse.button === Qt.RightButton) || Boolean(mouse.modifiers & Qt.ShiftModifier);
+                            root.toggleSortColumn("ticker", isLock);
+                        }
                     }
                 }
 
@@ -687,32 +922,49 @@ FloatingWindow {
                     spacing: 0
 
                     Item {
+                        id: inForceHeaderCell
                         width: root.inForceColW
                         height: parent.height
+                        readonly property var sortInfo: root.sortSpecInfo("inForce")
+                        QQC.ToolTip.visible: inForceSortHover.containsMouse
+                        QQC.ToolTip.delay: 500
+                        QQC.ToolTip.text: root.sortHeaderTooltip("inForce")
 
                         Rectangle {
                             anchors.fill: parent
-                            color: inForceSortHover.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06) : "transparent"
+                            color: (inForceHeaderCell.sortInfo && inForceHeaderCell.sortInfo.locked) ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, inForceSortHover.containsMouse ? 0.16 : 0.09) : (inForceSortHover.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06) : "transparent")
+                        }
+
+                        Rectangle {
+                            visible: inForceHeaderCell.sortInfo !== null
+                            anchors.bottom: parent.bottom
+                            width: parent.width
+                            height: Style.space(2)
+                            color: (inForceHeaderCell.sortInfo && inForceHeaderCell.sortInfo.locked) ? Color.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.35)
                         }
 
                         Text {
                             anchors.centerIn: parent
                             textFormat: Text.PlainText
-                            text: "IN-FORCE" + (root.sortKey === "inForce" ? (root.sortAsc ? " ↑" : " ↓") : "")
-                            color: (root.sortKey === "inForce" || inForceSortHover.containsMouse) ? root.foreground : root.dim
+                            text: "IN-FORCE" + root.sortHeaderSuffix("inForce")
+                            color: (inForceHeaderCell.sortInfo && inForceHeaderCell.sortInfo.locked) ? Color.accent : ((inForceHeaderCell.sortInfo || inForceSortHover.containsMouse) ? root.foreground : root.dim)
                             font.family: root.fontFamily
                             font.pixelSize: Style.font.caption
                             font.bold: true
-                            font.letterSpacing: 0.4
+                            font.letterSpacing: 0.3
                         }
 
                         MouseArea {
                             id: inForceSortHover
                             anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onEntered: root.clearRowHover("")
-                            onClicked: root.toggleSortColumn("inForce")
+                            onClicked: function (mouse) {
+                                var isLock = (mouse.button === Qt.RightButton) || Boolean(mouse.modifiers & Qt.ShiftModifier);
+                                root.toggleSortColumn("inForce", isLock);
+                            }
                         }
                     }
 
@@ -720,20 +972,33 @@ FloatingWindow {
                         model: root.scenarioTfs
 
                         Item {
+                            id: tfHeaderCell
                             required property string modelData
                             width: root.tfColW
                             height: parent.height
+                            readonly property var sortInfo: root.sortSpecInfo(modelData)
+                            QQC.ToolTip.visible: tfSortHover.containsMouse
+                            QQC.ToolTip.delay: 500
+                            QQC.ToolTip.text: root.sortHeaderTooltip(modelData)
 
                             Rectangle {
                                 anchors.fill: parent
-                                color: tfSortHover.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06) : "transparent"
+                                color: (tfHeaderCell.sortInfo && tfHeaderCell.sortInfo.locked) ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, tfSortHover.containsMouse ? 0.16 : 0.09) : (tfSortHover.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06) : "transparent")
+                            }
+
+                            Rectangle {
+                                visible: tfHeaderCell.sortInfo !== null
+                                anchors.bottom: parent.bottom
+                                width: parent.width
+                                height: Style.space(2)
+                                color: (tfHeaderCell.sortInfo && tfHeaderCell.sortInfo.locked) ? Color.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.35)
                             }
 
                             Text {
                                 anchors.centerIn: parent
                                 textFormat: Text.PlainText
-                                text: modelData + (root.sortKey === modelData ? (root.sortAsc ? " ↑" : " ↓") : "")
-                                color: (root.sortKey === modelData || tfSortHover.containsMouse) ? root.foreground : root.dim
+                                text: modelData + root.sortHeaderSuffix(modelData)
+                                color: (tfHeaderCell.sortInfo && tfHeaderCell.sortInfo.locked) ? Color.accent : ((tfHeaderCell.sortInfo || tfSortHover.containsMouse) ? root.foreground : root.dim)
                                 font.family: root.fontFamily
                                 font.pixelSize: Style.font.caption
                                 font.bold: true
@@ -742,10 +1007,14 @@ FloatingWindow {
                             MouseArea {
                                 id: tfSortHover
                                 anchors.fill: parent
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
                                 onEntered: root.clearRowHover("")
-                                onClicked: root.toggleSortColumn(parent.modelData)
+                                onClicked: function (mouse) {
+                                    var isLock = (mouse.button === Qt.RightButton) || Boolean(mouse.modifiers & Qt.ShiftModifier);
+                                    root.toggleSortColumn(tfHeaderCell.modelData, isLock);
+                                }
                             }
                         }
                     }
@@ -762,7 +1031,7 @@ FloatingWindow {
             Item {
                 id: listArea
                 width: parent.width
-                height: parent.height - topBar.height - sourcesBar.height - filterBar.height - columnHeader.height - 2
+                height: parent.height - topBar.height - sourcesBar.height - filterBar.height - sortBar.height - columnHeader.height - 2
 
                 ListView {
                     id: watchlistView

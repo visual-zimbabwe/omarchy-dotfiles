@@ -4127,6 +4127,115 @@ function evaluateSymbolSetupAlerts(symbol, candlesByTf, liveQuote, baskets) {
   return out
 }
 
+function canonicalAlertSortKey(key) {
+  var k = String(key || "").trim().toLowerCase()
+  if (k === "ticker" || k === "symbol") return "ticker"
+  if (k === "inforce" || k === "in-force") return "inForce"
+  if (k === "30") return "30"
+  if (k === "60") return "60"
+  if (k === "1d" || k === "d") return "1D"
+  if (k === "1w" || k === "w") return "1W"
+  if (k === "1m" || k === "m") return "1M"
+  return "inForce"
+}
+
+function normalizeAlertSortSpecs(sortSpecs, fallbackKey, fallbackAsc) {
+  var lockedOut = []
+  var unlockedOut = null
+  var seen = {}
+  if (isArrayLike(sortSpecs)) {
+    var arr = toArray(sortSpecs)
+    for (var i = 0; i < arr.length; i++) {
+      var sp = arr[i]
+      if (!sp || !sp.key) continue
+      var key = canonicalAlertSortKey(sp.key)
+      if (seen[key]) continue
+      seen[key] = true
+      var normalized = {
+        key: key,
+        asc: sp.asc === true,
+        locked: sp.locked === true
+      }
+      if (normalized.locked) lockedOut.push(normalized)
+      else if (!unlockedOut) unlockedOut = normalized
+    }
+  }
+  var out = lockedOut.slice()
+  if (unlockedOut) out.push(unlockedOut)
+  if (out.length === 0) {
+    var fbKey = canonicalAlertSortKey(fallbackKey || "inForce")
+    out.push({ key: fbKey, asc: fallbackAsc === true, locked: false })
+  }
+  return out
+}
+
+function applyAlertSortClick(sortSpecs, key) {
+  var target = canonicalAlertSortKey(key)
+  var specs = normalizeAlertSortSpecs(sortSpecs, "inForce", false)
+  for (var i = 0; i < specs.length; i++) {
+    if (specs[i].key === target) {
+      var next = specs.slice()
+      next[i] = {
+        key: specs[i].key,
+        asc: !specs[i].asc,
+        locked: specs[i].locked === true
+      }
+      return next
+    }
+  }
+  var lockedOnly = []
+  for (var j = 0; j < specs.length; j++) {
+    if (specs[j].locked === true) lockedOnly.push(specs[j])
+  }
+  lockedOnly.push({
+    key: target,
+    asc: target === "ticker",
+    locked: false
+  })
+  return lockedOnly
+}
+
+function toggleAlertSortLock(sortSpecs, key) {
+  var target = canonicalAlertSortKey(key)
+  var specs = normalizeAlertSortSpecs(sortSpecs, "inForce", false)
+  var idx = -1
+  for (var i = 0; i < specs.length; i++) {
+    if (specs[i].key === target) {
+      idx = i
+      break
+    }
+  }
+  if (idx !== -1) {
+    if (specs[idx].locked === true) {
+      if (specs.length === 1) {
+        return [{ key: specs[0].key, asc: specs[0].asc === true, locked: false }]
+      }
+      var remaining = specs.slice(0, idx).concat(specs.slice(idx + 1))
+      return normalizeAlertSortSpecs(remaining, "inForce", false)
+    }
+    var lockedNext = specs.slice()
+    lockedNext[idx] = {
+      key: specs[idx].key,
+      asc: specs[idx].asc === true,
+      locked: true
+    }
+    return normalizeAlertSortSpecs(lockedNext, "inForce", false)
+  }
+  var lockedPrefix = []
+  var unlockedTail = null
+  for (var j = 0; j < specs.length; j++) {
+    if (specs[j].locked === true) lockedPrefix.push(specs[j])
+    else if (!unlockedTail) unlockedTail = specs[j]
+  }
+  lockedPrefix.push({
+    key: target,
+    asc: target === "ticker",
+    locked: true
+  })
+  if (unlockedTail) lockedPrefix.push(unlockedTail)
+  return lockedPrefix
+}
+
 function buildGroupedAlertWatchlist(activeItems, options) {
   var opts = (options && typeof options === "object") ? options : ({})
   var tfFilter = String(opts.tfFilter || "ALL")
@@ -4134,8 +4243,7 @@ function buildGroupedAlertWatchlist(activeItems, options) {
   var query = String(opts.searchQuery || "").trim().toUpperCase()
   var collapsed = (opts.collapsed && typeof opts.collapsed === "object") ? opts.collapsed : ({})
   var sourceOrder = isArrayLike(opts.sourceOrder) ? toArray(opts.sourceOrder) : []
-  var sortKey = String(opts.sortKey || "inForce")
-  var sortAsc = opts.sortAsc === true
+  var activeSortSpecs = normalizeAlertSortSpecs(opts.sortSpecs, opts.sortKey || "inForce", opts.sortAsc === true)
 
   var list = isArrayLike(activeItems) ? toArray(activeItems) : []
   var filtered = []
@@ -4234,38 +4342,35 @@ function buildGroupedAlertWatchlist(activeItems, options) {
     return String(a.symbol || "").localeCompare(String(b.symbol || ""))
   }
 
-  var skLower = sortKey.toLowerCase()
-  var sortTf = ""
-  if (skLower === "30") sortTf = "30"
-  else if (skLower === "60") sortTf = "60"
-  else if (skLower === "1d" || skLower === "d") sortTf = "1D"
-  else if (skLower === "1w" || skLower === "w") sortTf = "1W"
-  else if (skLower === "1m" || skLower === "m") sortTf = "1M"
+  function compareByColumn(a, b, key, asc) {
+    if (key === "ticker") {
+      var symCmp = String(a.symbol || "").localeCompare(String(b.symbol || ""))
+      return asc ? symCmp : -symCmp
+    }
+    if (key === "inForce") {
+      if (Boolean(a.inForce) !== Boolean(b.inForce)) {
+        var ifCmp = a.inForce ? -1 : 1
+        return asc ? -ifCmp : ifCmp
+      }
+      return 0
+    }
+    var sa = scenarioSortScore(a, key)
+    var sb = scenarioSortScore(b, key)
+    if (sa !== sb) {
+      if (sa === -1) return 1
+      if (sb === -1) return -1
+      return asc ? (sa - sb) : (sb - sa)
+    }
+    return 0
+  }
 
   function compareRows(a, b) {
-    if (skLower === "ticker" || skLower === "symbol") {
-      var symCmp = String(a.symbol || "").localeCompare(String(b.symbol || ""))
-      if (symCmp !== 0) return sortAsc ? symCmp : -symCmp
-      return compareDefaultTieBreak(a, b)
+    for (var si = 0; si < activeSortSpecs.length; si++) {
+      var sp = activeSortSpecs[si]
+      var cmp = compareByColumn(a, b, sp.key, sp.asc)
+      if (cmp !== 0) return cmp
     }
-    if (sortTf) {
-      var sa = scenarioSortScore(a, sortTf)
-      var sb = scenarioSortScore(b, sortTf)
-      if (sa !== sb) {
-        if (sa === -1) return 1
-        if (sb === -1) return -1
-        return sortAsc ? (sa - sb) : (sb - sa)
-      }
-      return compareDefaultTieBreak(a, b)
-    }
-    if (Boolean(a.inForce) !== Boolean(b.inForce)) {
-      var ifCmp = a.inForce ? -1 : 1
-      return sortAsc ? -ifCmp : ifCmp
-    }
-    var ta = isFinite(a.triggeredAt) ? Number(a.triggeredAt) : 0
-    var tb = isFinite(b.triggeredAt) ? Number(b.triggeredAt) : 0
-    if (ta !== tb) return tb - ta
-    return String(a.symbol || "").localeCompare(String(b.symbol || ""))
+    return compareDefaultTieBreak(a, b)
   }
 
   var rows = []
@@ -6732,6 +6837,9 @@ if (typeof module !== "undefined") {
     setupTriggerKey: setupTriggerKey,
     computeTimeframeScenarioSnapshot: computeTimeframeScenarioSnapshot,
     evaluateSymbolSetupAlerts: evaluateSymbolSetupAlerts,
+    normalizeAlertSortSpecs: normalizeAlertSortSpecs,
+    applyAlertSortClick: applyAlertSortClick,
+    toggleAlertSortLock: toggleAlertSortLock,
     buildGroupedAlertWatchlist: buildGroupedAlertWatchlist,
     discordSetupAlertPayload: discordSetupAlertPayload,
     formatSetupAlertNotification: formatSetupAlertNotification,
