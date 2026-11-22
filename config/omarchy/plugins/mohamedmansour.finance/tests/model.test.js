@@ -1584,49 +1584,157 @@ test("isUsMarketOpen and isAlertSessionOpen enforce RTH market session gating fo
   assert.equal(Model.isAlertSessionOpen("BTC-USD", { session: "closed" }, false, weekendDate), true)
 })
 
-test("evaluatePriceLevelAlerts triggers only on live crossover during open session and persists state", () => {
-  const openRthDate = new Date("2026-07-15T15:00:00Z")
-  const levels = [
-    { price: 200.0, sourceTf: "60", anchorTs: 1752500000, text: "Breakout", tone: "up", alertEnabled: true, alertCondition: "CROSSES_ABOVE", alertTriggered: false }
+test("setup alert helpers normalize sources, classify Reversal vs Continuation separately, evaluate In-Force & scenarios, and persist state", () => {
+  // 1. Default and normalized alert sources
+  assert.deepEqual(Model.defaultAlertSources(), ["@MARKET"])
+  assert.deepEqual(Model.normalizeAlertSources(undefined), ["@MARKET"])
+  assert.deepEqual(Model.normalizeAlertSources([]), [])
+  assert.deepEqual(Model.normalizeAlertSources([" @m ", "smh", "XLK", "@e", "@unknown", "SMH"]), ["@MARKET", "SMH", "XLK", "@ENERGY"])
+
+  // 2. Setup group names keep Reversal & Continuation distinct
+  assert.equal(Model.setupGroupName({ code: "2d-1-2u", category: "inside_reversal" }), "2-1-2 Reversal")
+  assert.equal(Model.setupGroupName({ code: "2u-1-2d", category: "inside_reversal" }), "2-1-2 Reversal")
+  assert.equal(Model.setupGroupName({ code: "2u-1-2u", category: "inside_continuation" }), "2-1-2 Continuation")
+  assert.equal(Model.setupGroupName({ code: "2d-1-2d", category: "inside_continuation" }), "2-1-2 Continuation")
+  assert.equal(Model.setupGroupName({ code: "3-1-2u", category: "inside_reversal" }), "3-1-2 Reversal")
+  assert.equal(Model.setupGroupName({ code: "3-1-2u", category: "inside_continuation" }), "3-1-2 Continuation")
+  assert.equal(Model.setupGroupName({ code: "2d-2u", category: "2-2_reversal" }), "2-2 Reversal")
+  assert.equal(Model.setupGroupName({ code: "3-2d-2u", category: "2-2_reversal" }), "3-2-2 Reversal")
+  assert.equal(Model.setupGroupName({ code: "3-2u", category: "3-2_reversal" }), "3-2 Reversal")
+  assert.equal(Model.setupGroupName({ code: "1-3u", category: "1-bar_revstrat" }), "1-3 RevStrat")
+  assert.equal(Model.setupGroupName({ code: "1-2d-2u", category: "2-bar_revstrat" }), "1-2-2 RevStrat")
+  assert.equal(Model.setupGroupName({ code: "1-3(H)-2u", category: "2-bar_revstrat" }), "1-3-2 RevStrat")
+  assert.equal(Model.setupGroupName({ code: "PMG Up", category: "other" }), "PMG")
+  assert.equal(Model.setupGroupName({ code: "Kicker Dn", category: "other" }), "Kicker")
+
+  // 3. Evaluate setup alerts: 60m 2d-1-2u triggered & In-Force when close >= trigger, not In-Force on pullback
+  const baseTs = Date.UTC(2026, 6, 15, 13, 30) / 1000
+  const candles60 = [
+    { timestamp: baseTs - 10800, open: 105, high: 106, low: 102, close: 103 }, // p3
+    { timestamp: baseTs - 7200, open: 103, high: 104, low: 99, close: 100 },   // p2: 2d
+    { timestamp: baseTs - 3600, open: 100.5, high: 102.5, low: 100, close: 102 }, // p1: 1 (trig=102.5)
+    { timestamp: baseTs, open: 102.0, high: 103.4, low: 101.8, close: 103.2 }  // cur: 2u green, above 102.5
+  ]
+  const candles30 = [
+    { timestamp: baseTs - 1800, open: 103, high: 104, low: 101, close: 102 },
+    { timestamp: baseTs, open: 102.5, high: 102.5, low: 102.5, close: 102.5 } // flat close === open, inside bar 1
+  ]
+  // Build enough daily bars across 2 months for 1D, 1W, 1M derivation
+  const candles1D = [
+    { timestamp: Date.UTC(2026, 4, 15, 13, 30) / 1000, open: 90, high: 95, low: 88, close: 94 },
+    { timestamp: Date.UTC(2026, 5, 15, 13, 30) / 1000, open: 94, high: 101, low: 93, close: 99 },
+    { timestamp: Date.UTC(2026, 6, 6, 13, 30) / 1000, open: 99, high: 105, low: 98, close: 100 },
+    { timestamp: Date.UTC(2026, 6, 14, 13, 30) / 1000, open: 102, high: 104, low: 100, close: 101 },
+    { timestamp: Date.UTC(2026, 6, 15, 13, 30) / 1000, open: 101, high: 103.5, low: 100.5, close: 103.2 }
   ]
 
-  // Initial quote snapshot (prevPrice = null) does not fire
-  const initRes = Model.evaluatePriceLevelAlerts("AAPL", levels, null, 200.5, { session: "regular" }, openRthDate)
-  assert.equal(initRes.triggered.length, 0)
+  const activeInForce = Model.evaluateSymbolSetupAlerts("NVDA", { "30": candles30, "60": candles60, "1D": candles1D }, { regularPrice: 103.2 }, ["SMH", "XLK"])
+  const hit60 = activeInForce.find(a => a.timeframe === "60")
+  assert.ok(hit60, "60m 2d-1-2u setup detected")
+  assert.equal(hit60.setupGroup, "2-1-2 Reversal")
+  assert.equal(hit60.setupCode, "2d-1-2u")
+  assert.equal(hit60.direction, "LONG")
+  assert.equal(hit60.inForce, true)
+  assert.deepEqual(hit60.baskets, ["SMH", "XLK"])
+  // Uppercase scenario columns + strict close > open green / close < open red / close === open flat
+  assert.equal(hit60.scenarios["60"].sc, "2U")
+  assert.equal(hit60.scenarios["60"].colorTone, "up")
+  assert.equal(hit60.scenarios["30"].sc, "1")
+  assert.equal(hit60.scenarios["30"].colorTone, "up") // live 103.2 > open 102.5
 
-  // Live crossover from 199.80 to 200.10 fires alert and marks level alertTriggered = true
-  const crossRes = Model.evaluatePriceLevelAlerts("AAPL", levels, 199.80, 200.10, { session: "regular" }, openRthDate)
-  assert.equal(crossRes.triggered.length, 1)
-  assert.equal(crossRes.triggered[0].direction, "ABOVE")
-  assert.equal(crossRes.nextLevels[0].alertTriggered, true)
+  // Pullback below trigger (102.1 < 102.5) keeps setup triggered on the bar, flips inForce to false
+  const activePulledBack = Model.evaluateSymbolSetupAlerts("NVDA", { "30": candles30, "60": candles60, "1D": candles1D }, { regularPrice: 102.1 }, ["SMH", "XLK"])
+  const hit60Pb = activePulledBack.find(a => a.timeframe === "60")
+  assert.ok(hit60Pb)
+  assert.equal(hit60Pb.inForce, false)
+  assert.equal(hit60Pb.scenarios["30"].colorTone, "down") // 102.1 < 102.5
 
-  // Subsequent tick above 200 does not re-fire once alertTriggered is true
-  const repeatRes = Model.evaluatePriceLevelAlerts("AAPL", crossRes.nextLevels, 200.10, 200.40, { session: "regular" }, openRthDate)
-  assert.equal(repeatRes.triggered.length, 0)
+  // Exact close === open is flat
+  const snapFlat = Model.computeTimeframeScenarioSnapshot({ "30": candles30 }, null)
+  assert.equal(snapFlat["30"].sc, "1")
+  assert.equal(snapFlat["30"].colorTone, "flat")
 
-  // State serialization & parsing preserves symbolLevels and alertLog
+  // 4. 4-level Thinkorswim Watchlist grouping: Timeframe -> Up/Down -> Basket -> Setup (with multi-basket duplication)
+  const grouped = Model.buildGroupedAlertWatchlist([hit60], { sourceOrder: ["SMH", "XLK"] })
+  assert.equal(grouped.totalCount, 1)
+  assert.equal(grouped.inForceCount, 1)
+  const kinds = grouped.rows.map(r => r.kind)
+  assert.deepEqual(kinds, ["tf", "direction", "basket", "setup", "row", "basket", "setup", "row"])
+  assert.equal(grouped.rows[0].label, "60m")
+  assert.equal(grouped.rows[0].depth, 0)
+  assert.equal(grouped.rows[1].label, "BREAKING UP")
+  assert.equal(grouped.rows[1].depth, 1)
+  assert.equal(grouped.rows[2].label, "SMH")
+  assert.equal(grouped.rows[2].depth, 2)
+  assert.equal(grouped.rows[3].label, "2-1-2 Reversal")
+  assert.equal(grouped.rows[3].depth, 3)
+  assert.equal(grouped.rows[4].item.symbol, "NVDA")
+  assert.equal(grouped.rows[4].depth, 4)
+  assert.equal(grouped.rows[5].label, "XLK")
+  assert.equal(grouped.rows[6].label, "2-1-2 Reversal")
+  assert.equal(grouped.rows[7].item.symbol, "NVDA")
+
+  // Separate setup groups under the same basket & direction stay distinct, and direction collapse hides children
+  const contItem = Object.assign({}, hit60, {
+    key: "AMD:60:1:LONG:2u-1-2u",
+    symbol: "AMD",
+    setupGroup: "2-1-2 Continuation",
+    setupCode: "2u-1-2u",
+    baskets: ["SMH"]
+  })
+  const multiGrouped = Model.buildGroupedAlertWatchlist([hit60, contItem], { sourceOrder: ["SMH", "XLK"] })
+  const smhSetups = multiGrouped.rows.filter(r => r.kind === "setup" && r.basket === "SMH").map(r => r.label)
+  assert.deepEqual(smhSetups, ["2-1-2 Reversal", "2-1-2 Continuation"])
+  const collapsedDir = Model.buildGroupedAlertWatchlist([hit60, contItem], { collapsed: { "dir:60:LONG": true } })
+  assert.deepEqual(collapsedDir.rows.map(r => r.kind), ["tf", "direction"])
+
+  // inForceOnly filter hides pulled-back setups
+  const filteredOut = Model.buildGroupedAlertWatchlist([hit60Pb], { inForceOnly: true })
+  assert.equal(filteredOut.totalCount, 0)
+  assert.equal(filteredOut.rows.length, 0)
+
+  // 5. Notification & Discord payload formatting (single + coalesced burst)
+  const singleNotif = Model.formatSetupAlertNotification([hit60], 1795200000000)
+  assert.match(singleNotif.title, /NVDA/)
+  assert.match(singleNotif.body, /Breaking Up/)
+  const singleDiscord = JSON.parse(singleNotif.discordPayload)
+  assert.match(singleDiscord.content, /NVDA/)
+
+  const burstNotif = Model.formatSetupAlertNotification([hit60, Object.assign({}, hit60, { symbol: "AMD", key: "AMD:60:1:LONG:2d-1-2u" })], 1795200000000)
+  assert.match(burstNotif.title, /2 Setup Alerts Triggered/)
+  assert.equal(burstNotif.logEntries.length, 2)
+
+  // 6. State serialization & parsing persists alertSources, alertsAutoOpen, firedSetupKeys and ignores legacy symbolLevels
   const serialized = Model.serializeState(
-    ["AAPL"],
-    ["AAPL"],
+    ["SPY"],
+    ["SPY"],
     "1D",
     "2x2",
     { symbol: true, timeframe: false, crosshair: true, time: true },
-    ["AAPL"],
+    ["SPY"],
     {},
     {},
     "",
     ["60", "1D", "1W", "1M"],
     [-1, -1, -1, -1, -1],
     {
-      symbolLevels: { AAPL: crossRes.nextLevels },
-      alertLog: [crossRes.triggered[0].logEntry]
+      alertSources: ["@MARKET", "SMH", "XLK"],
+      alertsAutoOpen: false,
+      firedSetupKeys: { [hit60.key]: Date.now() },
+      alertLog: singleNotif.logEntries
     }
   )
   const parsedState = Model.parseState(serialized)
-  assert.ok(parsedState.symbolLevels && Array.isArray(parsedState.symbolLevels.AAPL))
-  assert.equal(parsedState.symbolLevels.AAPL[0].alertEnabled, true)
-  assert.equal(parsedState.symbolLevels.AAPL[0].alertTriggered, true)
+  assert.deepEqual(parsedState.alertSources, ["@MARKET", "SMH", "XLK"])
+  assert.equal(parsedState.alertsAutoOpen, false)
+  assert.ok(parsedState.firedSetupKeys && parsedState.firedSetupKeys[hit60.key] > 0)
   assert.equal(parsedState.alertLog.length, 1)
+  assert.equal(parsedState.symbolLevels, undefined)
+
+  // Legacy JSON containing symbolLevels parses cleanly without error
+  const legacyParsed = Model.parseState(JSON.stringify({ watchlist: ["SPY"], symbolLevels: { SPY: [{ price: 500 }] } }))
+  assert.deepEqual(legacyParsed.watchlist, ["SPY"])
+  assert.equal(legacyParsed.symbolLevels, undefined)
 })
 
 test("Update 3: computeSectorBreadth classifies all 2u bars under Truth #1 while distinguishing failed red 2u bars", () => {
@@ -2851,17 +2959,18 @@ test("marketDateEt matches America/New_York Intl formatter across EST, EDT, DST 
   }
 })
 
-test("armedAlertSymbols returns deduplicated symbols with active un-triggered alerts", () => {
-  const syms = Model.armedAlertSymbols({
-    "NVDA": [{ price: 150, alertEnabled: true, alertTriggered: false }],
-    "AAPL": [{ price: 200, alertEnabled: true, alertTriggered: true }],
-    "msft": [
-      { price: 400, alertEnabled: false, alertTriggered: false },
-      { price: 410, alertEnabled: true, alertTriggered: false }
-    ],
-    "TSLA": [{ price: 250, alertEnabled: false }]
-  })
-  assert.deepEqual(syms, ["NVDA", "MSFT"])
+test("normalizeFiredSetupKeys prunes expired entries and enforces max cap", () => {
+  const now = Date.UTC(2026, 10, 22, 15, 0)
+  const old = now - 50 * 86400000
+  const recent = now - 3600000
+  const norm = Model.normalizeFiredSetupKeys({
+    "SPY:60:1:LONG:2d-1-2u": recent,
+    "QQQ:60:1:SHORT:2u-1-2d": old,
+    "BAD": "not-a-number"
+  }, now)
+  assert.equal(norm["SPY:60:1:LONG:2d-1-2u"], recent)
+  assert.equal(norm["QQQ:60:1:SHORT:2u-1-2d"], undefined)
+  assert.equal(norm["BAD"], undefined)
 })
 
 test("matchesScenarioQuery bounded lookback produces identical results to full candle scan", () => {
