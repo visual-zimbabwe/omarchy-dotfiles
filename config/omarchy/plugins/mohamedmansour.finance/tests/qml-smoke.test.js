@@ -615,6 +615,11 @@ test("setup line alert engine wires off-thread scanner, Thinkorswim-style popout
   assert.match(alertsWin, /onModelChanged:\s*\{[\s\S]*?root\.syncHoveredRow/)
   assert.doesNotMatch(alertsWin, /root\.hoveredRowItem === tickerRow\.item/)
   assert.match(alertsWin, /typeof root\.startSystemMove === "function"[\s\S]*?root\.startSystemMove\(\)/)
+  assert.match(alertsWin, /property string sortKey:\s*"inForce"/)
+  assert.match(alertsWin, /function toggleSortColumn\(key\)/)
+  assert.match(alertsWin, /root\.toggleSortColumn\("ticker"\)/)
+  assert.match(alertsWin, /root\.toggleSortColumn\("inForce"\)/)
+  assert.match(alertsWin, /root\.toggleSortColumn\(parent\.modelData\)/)
 })
 
 test("grid window supports F fullscreen toggle, Tab/Backtab timeframe cycling in 1x1, chart double-click, and transient 1x1 persistence protection", () => {

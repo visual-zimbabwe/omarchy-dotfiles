@@ -1688,6 +1688,46 @@ test("setup alert helpers normalize sources, classify Reversal vs Continuation s
   const collapsedDir = Model.buildGroupedAlertWatchlist([hit60, contItem], { collapsed: { "dir:60:LONG": true } })
   assert.deepEqual(collapsedDir.rows.map(r => r.kind), ["tf", "direction"])
 
+  // Sortable columns within groups: ticker (asc/desc), inForce (desc/asc), and timeframe scenario rank (3 > 2U > 2D > 1, green > red, missing last)
+  const sortItems = [
+    Object.assign({}, hit60, {
+      key: "MSFT:60:1:LONG:2d-1-2u",
+      symbol: "MSFT",
+      inForce: false,
+      triggeredAt: 300,
+      baskets: ["SMH"],
+      scenarios: { "30": { sc: "1", colorTone: "down" }, "60": { sc: "2U", colorTone: "up" }, "1D": { sc: "2D", colorTone: "up" } }
+    }),
+    Object.assign({}, hit60, {
+      key: "AAPL:60:1:LONG:2d-1-2u",
+      symbol: "AAPL",
+      inForce: true,
+      triggeredAt: 100,
+      baskets: ["SMH"],
+      scenarios: { "30": { sc: "3", colorTone: "up" }, "60": { sc: "2U", colorTone: "up" }, "1D": { sc: "3", colorTone: "down" } }
+    }),
+    Object.assign({}, hit60, {
+      key: "NVDA:60:1:LONG:2d-1-2u",
+      symbol: "NVDA",
+      inForce: true,
+      triggeredAt: 200,
+      baskets: ["SMH"],
+      scenarios: { "30": { sc: "3", colorTone: "down" }, "60": { sc: "2U", colorTone: "up" }, "1D": { sc: "-", colorTone: "flat" } }
+    })
+  ]
+  const rowSymbols = (opts) => Model.buildGroupedAlertWatchlist(sortItems, opts).rows.filter(r => r.kind === "row").map(r => r.item.symbol)
+  assert.deepEqual(rowSymbols({ sortKey: "ticker", sortAsc: true }), ["AAPL", "MSFT", "NVDA"])
+  assert.deepEqual(rowSymbols({ sortKey: "ticker", sortAsc: false }), ["NVDA", "MSFT", "AAPL"])
+  assert.deepEqual(rowSymbols({ sortKey: "inForce", sortAsc: false }), ["NVDA", "AAPL", "MSFT"])
+  assert.deepEqual(rowSymbols({ sortKey: "inForce", sortAsc: true }), ["MSFT", "NVDA", "AAPL"])
+  // 30m scenario desc: 3 green (AAPL) > 3 red (NVDA) > 1 red (MSFT)
+  assert.deepEqual(rowSymbols({ sortKey: "30", sortAsc: false }), ["AAPL", "NVDA", "MSFT"])
+  // 30m scenario asc: 1 red (MSFT) < 3 red (NVDA) < 3 green (AAPL)
+  assert.deepEqual(rowSymbols({ sortKey: "30", sortAsc: true }), ["MSFT", "NVDA", "AAPL"])
+  // Missing ("-") always stays at the bottom for both asc and desc
+  assert.deepEqual(rowSymbols({ sortKey: "1D", sortAsc: false }), ["AAPL", "MSFT", "NVDA"])
+  assert.deepEqual(rowSymbols({ sortKey: "1D", sortAsc: true }), ["MSFT", "AAPL", "NVDA"])
+
   // inForceOnly filter hides pulled-back setups
   const filteredOut = Model.buildGroupedAlertWatchlist([hit60Pb], { inForceOnly: true })
   assert.equal(filteredOut.totalCount, 0)

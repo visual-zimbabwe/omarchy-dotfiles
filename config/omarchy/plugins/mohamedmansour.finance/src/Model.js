@@ -4134,6 +4134,8 @@ function buildGroupedAlertWatchlist(activeItems, options) {
   var query = String(opts.searchQuery || "").trim().toUpperCase()
   var collapsed = (opts.collapsed && typeof opts.collapsed === "object") ? opts.collapsed : ({})
   var sourceOrder = isArrayLike(opts.sourceOrder) ? toArray(opts.sourceOrder) : []
+  var sortKey = String(opts.sortKey || "inForce")
+  var sortAsc = opts.sortAsc === true
 
   var list = isArrayLike(activeItems) ? toArray(activeItems) : []
   var filtered = []
@@ -4210,8 +4212,56 @@ function buildGroupedAlertWatchlist(activeItems, options) {
     return a.localeCompare(b)
   }
 
-  function compareRows(a, b) {
+  function scenarioSortScore(item, tf) {
+    var scObj = (item && item.scenarios && item.scenarios[tf]) ? item.scenarios[tf] : null
+    if (!scObj || !scObj.sc || scObj.sc === "-") return -1
+    var code = String(scObj.sc).toUpperCase()
+    var barRank = 0
+    if (code === "3") barRank = 4
+    else if (code === "2U") barRank = 3
+    else if (code === "2D") barRank = 2
+    else if (code === "1") barRank = 1
+    if (barRank === 0) return -1
+    var polRank = (scObj.colorTone === "up") ? 2 : (scObj.colorTone === "flat" ? 1 : 0)
+    return barRank * 10 + polRank
+  }
+
+  function compareDefaultTieBreak(a, b) {
     if (Boolean(a.inForce) !== Boolean(b.inForce)) return a.inForce ? -1 : 1
+    var ta = isFinite(a.triggeredAt) ? Number(a.triggeredAt) : 0
+    var tb = isFinite(b.triggeredAt) ? Number(b.triggeredAt) : 0
+    if (ta !== tb) return tb - ta
+    return String(a.symbol || "").localeCompare(String(b.symbol || ""))
+  }
+
+  var skLower = sortKey.toLowerCase()
+  var sortTf = ""
+  if (skLower === "30") sortTf = "30"
+  else if (skLower === "60") sortTf = "60"
+  else if (skLower === "1d" || skLower === "d") sortTf = "1D"
+  else if (skLower === "1w" || skLower === "w") sortTf = "1W"
+  else if (skLower === "1m" || skLower === "m") sortTf = "1M"
+
+  function compareRows(a, b) {
+    if (skLower === "ticker" || skLower === "symbol") {
+      var symCmp = String(a.symbol || "").localeCompare(String(b.symbol || ""))
+      if (symCmp !== 0) return sortAsc ? symCmp : -symCmp
+      return compareDefaultTieBreak(a, b)
+    }
+    if (sortTf) {
+      var sa = scenarioSortScore(a, sortTf)
+      var sb = scenarioSortScore(b, sortTf)
+      if (sa !== sb) {
+        if (sa === -1) return 1
+        if (sb === -1) return -1
+        return sortAsc ? (sa - sb) : (sb - sa)
+      }
+      return compareDefaultTieBreak(a, b)
+    }
+    if (Boolean(a.inForce) !== Boolean(b.inForce)) {
+      var ifCmp = a.inForce ? -1 : 1
+      return sortAsc ? -ifCmp : ifCmp
+    }
     var ta = isFinite(a.triggeredAt) ? Number(a.triggeredAt) : 0
     var tb = isFinite(b.triggeredAt) ? Number(b.triggeredAt) : 0
     if (ta !== tb) return tb - ta

@@ -24,6 +24,8 @@ FloatingWindow {
     property string tfFilter: "ALL"
     property bool inForceOnly: false
     property string searchQuery: ""
+    property string sortKey: "inForce"
+    property bool sortAsc: false
     property var collapsedGroups: ({})
     property double clockNowMs: Date.now()
     property string hoveredRowId: ""
@@ -56,7 +58,7 @@ FloatingWindow {
     readonly property bool isLightBg: Model.isLightColor(Color.background)
 
     readonly property int tfColW: Style.space(44)
-    readonly property int inForceColW: Style.space(62)
+    readonly property int inForceColW: Style.space(72)
     readonly property var quickSources: ["@MARKET", "SMH", "XLK", "@ENERGY"]
     readonly property var scenarioTfs: ["30", "60", "1D", "1W", "1M"]
 
@@ -75,7 +77,9 @@ FloatingWindow {
             inForceOnly: root.inForceOnly,
             searchQuery: root.searchQuery,
             collapsed: root.collapsedGroups,
-            sourceOrder: root.alertSources || []
+            sourceOrder: root.alertSources || [],
+            sortKey: root.sortKey,
+            sortAsc: root.sortAsc
         })
 
     readonly property bool allCollapsed: {
@@ -187,6 +191,18 @@ FloatingWindow {
         if (!rowId || root.hoveredRowId === rowId) {
             root.hoveredRowId = "";
             root.hoveredRowItem = null;
+        }
+    }
+
+    function toggleSortColumn(key) {
+        if (!key)
+            return;
+        root.clearRowHover("");
+        if (root.sortKey === key) {
+            root.sortAsc = !root.sortAsc;
+        } else {
+            root.sortKey = key;
+            root.sortAsc = (key === "ticker");
         }
     }
 
@@ -622,57 +638,115 @@ FloatingWindow {
                 color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
             }
 
-            // Sticky Thinkorswim Watchlist Column Header
+            // Sticky Thinkorswim Watchlist Column Header (Clickable Sortable Columns)
             Rectangle {
                 id: columnHeader
                 width: parent.width
                 height: Style.space(24)
                 color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
 
-                Text {
+                Item {
+                    id: tickerHeaderCell
                     anchors.left: parent.left
-                    anchors.leftMargin: Style.space(12)
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.PlainText
-                    text: "TICKER"
-                    color: root.dim
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    font.bold: true
-                    font.letterSpacing: 0.6
-                }
+                    anchors.right: headerColsRow.left
+                    height: parent.height
 
-                Row {
-                    anchors.right: parent.right
-                    anchors.rightMargin: Style.space(10)
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 0
+                    Rectangle {
+                        anchors.fill: parent
+                        color: tickerSortHover.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06) : "transparent"
+                    }
 
                     Text {
-                        width: root.inForceColW
-                        horizontalAlignment: Text.AlignHCenter
+                        anchors.left: parent.left
+                        anchors.leftMargin: Style.space(12)
+                        anchors.verticalCenter: parent.verticalCenter
                         textFormat: Text.PlainText
-                        text: "IN-FORCE"
-                        color: root.dim
+                        text: "TICKER" + (root.sortKey === "ticker" ? (root.sortAsc ? " ↑" : " ↓") : "")
+                        color: (root.sortKey === "ticker" || tickerSortHover.containsMouse) ? root.foreground : root.dim
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.caption
                         font.bold: true
-                        font.letterSpacing: 0.4
+                        font.letterSpacing: 0.6
+                    }
+
+                    MouseArea {
+                        id: tickerSortHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onEntered: root.clearRowHover("")
+                        onClicked: root.toggleSortColumn("ticker")
+                    }
+                }
+
+                Row {
+                    id: headerColsRow
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.space(10)
+                    height: parent.height
+                    spacing: 0
+
+                    Item {
+                        width: root.inForceColW
+                        height: parent.height
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: inForceSortHover.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06) : "transparent"
+                        }
+
+                        Text {
+                            anchors.centerIn: parent
+                            textFormat: Text.PlainText
+                            text: "IN-FORCE" + (root.sortKey === "inForce" ? (root.sortAsc ? " ↑" : " ↓") : "")
+                            color: (root.sortKey === "inForce" || inForceSortHover.containsMouse) ? root.foreground : root.dim
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.caption
+                            font.bold: true
+                            font.letterSpacing: 0.4
+                        }
+
+                        MouseArea {
+                            id: inForceSortHover
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onEntered: root.clearRowHover("")
+                            onClicked: root.toggleSortColumn("inForce")
+                        }
                     }
 
                     Repeater {
                         model: root.scenarioTfs
 
-                        Text {
+                        Item {
                             required property string modelData
                             width: root.tfColW
-                            horizontalAlignment: Text.AlignHCenter
-                            textFormat: Text.PlainText
-                            text: modelData
-                            color: root.dim
-                            font.family: root.fontFamily
-                            font.pixelSize: Style.font.caption
-                            font.bold: true
+                            height: parent.height
+
+                            Rectangle {
+                                anchors.fill: parent
+                                color: tfSortHover.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06) : "transparent"
+                            }
+
+                            Text {
+                                anchors.centerIn: parent
+                                textFormat: Text.PlainText
+                                text: modelData + (root.sortKey === modelData ? (root.sortAsc ? " ↑" : " ↓") : "")
+                                color: (root.sortKey === modelData || tfSortHover.containsMouse) ? root.foreground : root.dim
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption
+                                font.bold: true
+                            }
+
+                            MouseArea {
+                                id: tfSortHover
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onEntered: root.clearRowHover("")
+                                onClicked: root.toggleSortColumn(parent.modelData)
+                            }
                         }
                     }
                 }
