@@ -28,7 +28,7 @@
   "detailRange": "1M",
   "gridMode": "2x2",
   "gridSync": {
-    "symbol": false,
+    "symbol": true,
     "timeframe": false,
     "crosshair": false,
     "time": false,
@@ -36,11 +36,11 @@
     "setupLines": true
   },
   "gridSymbols": [
-    "SPY",
-    "SPY",
-    "SPY",
-    "SPY",
-    "SPY"
+    "AMD",
+    "AMD",
+    "AMD",
+    "AMD",
+    "AMD"
   ],
   "gridSplits": {
     "2x2": {
@@ -238,7 +238,7 @@
   ],
   "gridZooms": [
     95,
-    19,
+    125,
     20,
     20,
     8
@@ -694,7 +694,12 @@
     "SPY:60:1795199400:CONFLICT": "TARGET_HIT",
     "SPY:60:1795203000:SHORT": "TARGET_HIT",
     "SPY:30:1795204800:SHORT": "TARGET_HIT",
-    "SPY:30:1795204800:CONFLICT": "TARGET_HIT"
+    "SPY:30:1795204800:CONFLICT": "TARGET_HIT",
+    "SPY:30:1795033800:SHORT": "TARGET_HIT",
+    "AMD:30:1795204800:SHORT": "TARGET_HIT",
+    "AMD:30:1795204800:CONFLICT": "TARGET_HIT",
+    "AMD:30:1795201200:SHORT": "TARGET_HIT",
+    "AMD:30:1795197600:SHORT": "TARGET_HIT"
   },
   "alertLog": [
     {
