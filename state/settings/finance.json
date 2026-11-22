@@ -28,18 +28,19 @@
   "detailRange": "1M",
   "gridMode": "2x2",
   "gridSync": {
-    "symbol": false,
-    "timeframe": false,
+    "broadening": true,
     "crosshair": false,
+    "setupLines": true,
+    "symbol": false,
     "time": false,
-    "broadening": true
+    "timeframe": false
   },
   "gridSymbols": [
-    "QQQ",
-    "QQQ",
-    "QQQ",
-    "QQQ",
-    "QQQ"
+    "SPY",
+    "SPY",
+    "SPY",
+    "SPY",
+    "SPY"
   ],
   "gridSplits": {
     "2x2": {
@@ -229,15 +230,16 @@
     }
   },
   "gridTimeframes": [
-    "60",
+    "30",
     "1D",
     "1W",
-    "1M"
+    "1M",
+    "1D"
   ],
   "gridZooms": [
     95,
-    110,
-    40,
+    19,
+    20,
     20,
     8
   ],
@@ -688,7 +690,10 @@
     "GOOGL:60:1795199400:CONFLICT": "ARMED_NOTIFIED",
     "SPY:60:1795199400:SHORT": "TARGET_HIT",
     "GOOGL:60:1795203000:SHORT": "TARGET_HIT",
-    "GOOGL:60:1795206600:SHORT": "TARGET_HIT"
+    "GOOGL:60:1795206600:SHORT": "TARGET_HIT",
+    "SPY:60:1795199400:CONFLICT": "TARGET_HIT",
+    "SPY:60:1795203000:SHORT": "TARGET_HIT",
+    "SPY:30:1795204800:SHORT": "TARGET_HIT"
   },
   "alertLog": [
     {

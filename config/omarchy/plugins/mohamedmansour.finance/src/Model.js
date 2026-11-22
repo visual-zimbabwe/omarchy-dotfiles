@@ -2732,6 +2732,8 @@ function detectStratSetupOnCandles(tf, candles, liveQuote, options) {
       anchorTs: anchorTs,
       ohlcField: ohlcField,
       closePrice: cur.close,
+      barHigh: cur.high,
+      barLow: cur.low,
       signalCandle: p1,
       signalTimestamp: p1.timestamp,
       activeTimestamp: cur.timestamp,
@@ -2898,11 +2900,13 @@ function resolveTimeframeSetupTargets(tf, candles, setup, maxTargets) {
   return deduped
 }
 
-// Compute automatic Trigger & Progressive Target lines for a GridWindow cell on targetCellTf.
+// Compute automatic Trigger & Ratcheting [T1, T2] Target lines for a GridWindow cell on targetCellTf.
 // - Only active on 30, 60, 1D, 1W, 1M (returns [] for 1Y, 15, 5, 1, etc.)
 // - Cascades higher timeframes down (1M -> 1M/1W/1D/60/30, 1W -> 1W/1D/60/30, etc.)
 // - Draws ONLY once triggered; stays on for the full life of the active bar
-// - Trigger + T1 always visible once triggered; Tk (k >= 2) shown iff close is past T(k-1)
+// - Max 2 target lines per timeframe (T1 and optional T2):
+//   * Once the bar's extreme hits L2 (or deeper Lk), Lk promotes to T1 and earlier hit targets drop off.
+//   * T1 stays drawn for the rest of the bar; T2 is shown only while live/close price is past T1.
 function computeTriggeredSetupLines(candlesByTf, liveQuote, targetCellTf) {
   var tgtKey = String(targetCellTf || "")
   if (!isSetupLineTimeframe(tgtKey)) return []
@@ -2939,28 +2943,56 @@ function computeTriggeredSetupLines(candlesByTf, liveQuote, targetCellTf) {
     var allTargets = resolveTimeframeSetupTargets(tf, tfCandles, setup)
     if (allTargets.length === 0) continue
 
-    // T1 is always shown once triggered; T2..TN appear/disappear dynamically based on close vs T(k-1)
     var closePx = isFinite(setup.closePrice) ? setup.closePrice : setup.triggerPrice
-    for (var ti = 0; ti < allTargets.length; ti++) {
-      if (ti >= 1) {
-        var prevTargetPx = allTargets[ti - 1].price
-        var pastPrev = setup.isLong ? (closePx >= prevTargetPx) : (closePx <= prevTargetPx)
-        if (!pastPrev) break
+    var barExtreme = setup.isLong
+      ? (isFinite(setup.barHigh) ? setup.barHigh : closePx)
+      : (isFinite(setup.barLow) ? setup.barLow : closePx)
+
+    var baseIdx = 0
+    for (var hi = 1; hi < allTargets.length; hi++) {
+      var hitTarget = setup.isLong
+        ? (barExtreme >= allTargets[hi].price)
+        : (barExtreme <= allTargets[hi].price)
+      if (hitTarget) {
+        baseIdx = hi
+      } else {
+        break
       }
-      var tObj = allTargets[ti]
-      lines.push({
-        id: tf + ":target:" + tObj.index,
-        timeframe: tf,
-        sourceTf: tf,
-        kind: "target",
-        targetIndex: tObj.index,
-        direction: setup.direction,
-        setupCode: setup.code,
-        price: tObj.price,
-        anchorTs: tObj.anchorTs,
-        ohlcField: tObj.ohlcField,
-        label: tfLbl + " " + tObj.label
-      })
+    }
+
+    var t1Obj = allTargets[baseIdx]
+    lines.push({
+      id: tf + ":target:1",
+      timeframe: tf,
+      sourceTf: tf,
+      kind: "target",
+      targetIndex: 1,
+      direction: setup.direction,
+      setupCode: setup.code,
+      price: t1Obj.price,
+      anchorTs: t1Obj.anchorTs,
+      ohlcField: t1Obj.ohlcField,
+      label: tfLbl + " T1"
+    })
+
+    if (baseIdx + 1 < allTargets.length) {
+      var pastT1 = setup.isLong ? (closePx >= t1Obj.price) : (closePx <= t1Obj.price)
+      if (pastT1) {
+        var t2Obj = allTargets[baseIdx + 1]
+        lines.push({
+          id: tf + ":target:2",
+          timeframe: tf,
+          sourceTf: tf,
+          kind: "target",
+          targetIndex: 2,
+          direction: setup.direction,
+          setupCode: setup.code,
+          price: t2Obj.price,
+          anchorTs: t2Obj.anchorTs,
+          ohlcField: t2Obj.ohlcField,
+          label: tfLbl + " T2"
+        })
+      }
     }
   }
 

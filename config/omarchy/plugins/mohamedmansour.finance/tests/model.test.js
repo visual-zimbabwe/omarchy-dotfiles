@@ -5337,7 +5337,7 @@ test("computeTriggeredSetupLines enforces trigger gating, bar lifetime, cascade,
     ["1M T1", 220, "target"]
   ])
 
-  // 3. Close crosses T1 (close=225 >= 220, < 232): T2 (232) appears; T3 (245) stays hidden
+  // 3. Close crosses L1 (220) without hitting L2 (232): shows T1=220 and T2=232
   const pastT1 = Model.computeTriggeredSetupLines({ "1M": [...mBase, c(600, 210, 226, 209, 225)] }, { regularMarketPrice: 225 }, "1M")
   assert.deepEqual(pastT1.map(l => [l.label, l.price]), [
     ["1M 2d-1-2u TRIG", 215],
@@ -5345,20 +5345,26 @@ test("computeTriggeredSetupLines enforces trigger gating, bar lifetime, cascade,
     ["1M T2", 232]
   ])
 
-  // 4. Close crosses T2 (close=236 >= 232): T3 (245) appears
-  const pastT2 = Model.computeTriggeredSetupLines({ "1M": [...mBase, c(600, 210, 237, 209, 236)] }, { regularMarketPrice: 236 }, "1M")
-  assert.deepEqual(pastT2.map(l => [l.label, l.price]), [
-    ["1M 2d-1-2u TRIG", 215],
-    ["1M T1", 220],
-    ["1M T2", 232],
-    ["1M T3", 245]
-  ])
-
-  // 5. Retrace back below T1 (high still 237, close drops to 218 < 220): T2/T3 disappear, Trigger + T1 STAY ON for the bar
-  const retraced = Model.computeTriggeredSetupLines({ "1M": [...mBase, c(600, 210, 237, 209, 218)] }, { regularMarketPrice: 218 }, "1M")
-  assert.deepEqual(retraced.map(l => [l.label, l.price]), [
+  // 3b. Retrace below L1 (220) BEFORE L2 (232) was hit: T2 (232) hides, leaving Trigger + T1 (220)
+  const retraceBeforeL2 = Model.computeTriggeredSetupLines({ "1M": [...mBase, c(600, 210, 226, 209, 218)] }, { regularMarketPrice: 218 }, "1M")
+  assert.deepEqual(retraceBeforeL2.map(l => [l.label, l.price]), [
     ["1M 2d-1-2u TRIG", 215],
     ["1M T1", 220]
+  ])
+
+  // 4. Bar hits L2 (232) and close >= 232: old 220 drops, 232 promotes to T1, and 245 becomes T2 (max 2 targets)
+  const hitL2 = Model.computeTriggeredSetupLines({ "1M": [...mBase, c(600, 210, 237, 209, 236)] }, { regularMarketPrice: 236 }, "1M")
+  assert.deepEqual(hitL2.map(l => [l.label, l.price]), [
+    ["1M 2d-1-2u TRIG", 215],
+    ["1M T1", 232],
+    ["1M T2", 245]
+  ])
+
+  // 5. After L2 (232) was hit, retrace all the way below old L1 (218 < 220): 232 STAYS as T1, 245 hides
+  const retracedAfterL2 = Model.computeTriggeredSetupLines({ "1M": [...mBase, c(600, 210, 237, 209, 218)] }, { regularMarketPrice: 218 }, "1M")
+  assert.deepEqual(retracedAfterL2.map(l => [l.label, l.price]), [
+    ["1M 2d-1-2u TRIG", 215],
+    ["1M T1", 232]
   ])
 
   // 6. New bar opens (inside bar after bar 600): previous month's lines disappear
@@ -5367,12 +5373,12 @@ test("computeTriggeredSetupLines enforces trigger gating, bar lifetime, cascade,
   }, { regularMarketPrice: 228 }, "1M")
   assert.equal(nextMonth.length, 0)
 
-  // 7. Bearish progressive targets mirror: Trig=200, T1=190, T2=180, T3=168
+  // 7. Bearish ratcheting [T1, T2] mirror: Trig=200, levels 190 -> 180 -> 168
   const wBearBase = [
-    c(100, 175, 185, 168, 178), // p5 trough = 168 (T3)
+    c(100, 175, 185, 168, 178), // p5 trough = 168 (L3)
     c(200, 186, 192, 184, 188), // p4 bounce above p3 trough (not a trough)
-    c(300, 182, 195, 180, 192), // p3 trough = 180 (T2)
-    c(400, 192, 210, 190, 208), // p2 (2u): low = 190 (T1)
+    c(300, 182, 195, 180, 192), // p3 trough = 180 (L2)
+    c(400, 192, 210, 190, 208), // p2 (2u): low = 190 (L1)
     c(500, 206, 208, 200, 202)  // p1 (1): trigger = 200
   ]
   const bearAboveT1 = Model.computeTriggeredSetupLines({ "1W": [...wBearBase, c(600, 201, 202, 194, 195)] }, { regularMarketPrice: 195 }, "1W")
@@ -5381,8 +5387,17 @@ test("computeTriggeredSetupLines enforces trigger gating, bar lifetime, cascade,
   const bearBelowT1 = Model.computeTriggeredSetupLines({ "1W": [...wBearBase, c(600, 201, 202, 187, 188)] }, { regularMarketPrice: 188 }, "1W")
   assert.deepEqual(bearBelowT1.map(l => [l.label, l.price]), [["1W 2u-1-2d TRIG", 200], ["1W T1", 190], ["1W T2", 180]])
 
-  const bearBelowT2 = Model.computeTriggeredSetupLines({ "1W": [...wBearBase, c(600, 201, 202, 177, 178)] }, { regularMarketPrice: 178 }, "1W")
-  assert.deepEqual(bearBelowT2.map(l => [l.label, l.price]), [["1W 2u-1-2d TRIG", 200], ["1W T1", 190], ["1W T2", 180], ["1W T3", 168]])
+  // Bar hits L2 (180) then bounces above old L1 (192 > 190): L2 (180) becomes T1, 190 dropped, 168 hidden
+  const bearHitL2Bounce = Model.computeTriggeredSetupLines({ "1W": [...wBearBase, c(600, 201, 202, 180, 192)] }, { regularMarketPrice: 192 }, "1W")
+  assert.deepEqual(bearHitL2Bounce.map(l => [l.label, l.price]), [["1W 2u-1-2d TRIG", 200], ["1W T1", 180]])
+
+  // Bar hits L2 (180) and close <= 180 (178): L2 (180) is T1, L3 (168) is T2
+  const bearBelowNewT1 = Model.computeTriggeredSetupLines({ "1W": [...wBearBase, c(600, 201, 202, 177, 178)] }, { regularMarketPrice: 178 }, "1W")
+  assert.deepEqual(bearBelowNewT1.map(l => [l.label, l.price]), [["1W 2u-1-2d TRIG", 200], ["1W T1", 180], ["1W T2", 168]])
+
+  // Bar hits final target L3 (168): 168 promotes to T1, no T2 beyond it
+  const bearHitL3 = Model.computeTriggeredSetupLines({ "1W": [...wBearBase, c(600, 201, 202, 166, 167)] }, { regularMarketPrice: 167 }, "1W")
+  assert.deepEqual(bearHitL3.map(l => [l.label, l.price]), [["1W 2u-1-2d TRIG", 200], ["1W T1", 168]])
 
   // 8. Cascade-down visibility + strict timeframe eligibility (1Y, 15, 5 excluded)
   const cascadeMap = {
