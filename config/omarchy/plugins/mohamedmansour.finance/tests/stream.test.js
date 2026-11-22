@@ -92,6 +92,30 @@ test("decodeYahooPricingProtobuf and normalizeYahooTick handle regular, pre/post
   assert.equal(tickCrypto.symbol, "ETH-USD")
   assert.equal(tickCrypto.session, "live")
   assert.equal(tickCrypto.hasExtended, false)
+
+  // Overnight tick (marketHours=4) maps to extended "post" and never regular; unknown marketHours maps to "closed"
+  const overnightBuf = Buffer.concat([
+    pbString(1, "MPWR"),
+    pbFloat(2, 1142.05),
+    pbVarint(6, 8),
+    pbVarint(7, 4) // OVERNIGHT_MARKET
+  ])
+  const tickOvernight = Stream.normalizeYahooTick(Stream.decodeYahooPricingProtobuf(overnightBuf))
+  assert.equal(tickOvernight.symbol, "MPWR")
+  assert.equal(tickOvernight.session, "post")
+  assert.equal(tickOvernight.hasExtended, true)
+  assert.ok(Math.abs(tickOvernight.extendedPrice - 1142.05) < 1e-2)
+  assert.equal(tickOvernight.regularPrice, undefined)
+
+  const unknownHoursBuf = Buffer.concat([
+    pbString(1, "MPWR"),
+    pbFloat(2, 1142.05),
+    pbVarint(6, 8),
+    pbVarint(7, 9) // unknown / closed
+  ])
+  const tickClosed = Stream.normalizeYahooTick(Stream.decodeYahooPricingProtobuf(unknownHoursBuf))
+  assert.equal(tickClosed.session, "closed")
+  assert.equal(tickClosed.regularPrice, undefined)
 })
 
 test("normalizeCoinbaseTick and normalizeHyperliquidMids normalize exchange WS messages", () => {
@@ -404,4 +428,32 @@ test("OffThreadCandleCache persists fetchedAt and SetupAlertScanner rehydrates s
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true })
   }
+})
+
+test("updateTrailingCandleInPlace blocks off-RTH and weekend phantom rollovers on US equities", () => {
+  const Model = require("../src/Model.js")
+  const sunEve = new Date("2026-11-22T23:23:00Z")
+  const fri30 = [
+    { timestamp: Date.UTC(2026, 10, 20, 20, 0) / 1000, open: 1161.26, high: 1163.58, low: 1147.01, close: 1149.96, volume: 100 },
+    { timestamp: Date.UTC(2026, 10, 20, 20, 30) / 1000, open: 1149.31, high: 1157.00, low: 1132.78, close: 1142.05, volume: 100 }
+  ]
+  const fri60 = [
+    { timestamp: Date.UTC(2026, 10, 20, 19, 30) / 1000, open: 1163.74, high: 1167.92, low: 1147.01, close: 1149.96, volume: 100 },
+    { timestamp: Date.UTC(2026, 10, 20, 20, 30) / 1000, open: 1149.31, high: 1157.00, low: 1132.78, close: 1142.05, volume: 100 }
+  ]
+  const fri1D = [
+    { timestamp: Date.UTC(2026, 10, 19, 14, 30) / 1000, open: 1368.30, high: 1378.06, low: 1288.08, close: 1295.86, volume: 100 },
+    { timestamp: Date.UTC(2026, 10, 20, 14, 30) / 1000, open: 1260.38, high: 1271.13, low: 1132.78, close: 1142.05, volume: 100 }
+  ]
+  const spoofTick = { symbol: "MPWR", price: 1142.05, regularPrice: 1142.05, session: "regular" }
+
+  const res30 = Stream.updateTrailingCandleInPlace(fri30, spoofTick, "30", sunEve)
+  const res60 = Stream.updateTrailingCandleInPlace(fri60, spoofTick, "60", sunEve)
+  const res1D = Stream.updateTrailingCandleInPlace(fri1D, spoofTick, "1D", sunEve)
+  assert.equal(res30.length, 2)
+  assert.equal(res60.length, 2)
+  assert.equal(res1D.length, 2)
+  assert.equal(Model.stratScenario(res30[1], res30[0]), "2d")
+  assert.equal(Model.stratScenario(res60[1], res60[0]), "2d")
+  assert.equal(Model.stratScenario(res1D[1], res1D[0]), "2d")
 })

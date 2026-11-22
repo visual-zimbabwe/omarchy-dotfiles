@@ -3375,6 +3375,43 @@ test("updateDevelopingCandle preserves RTH purity, aligns 60m US equities to 09:
   assert.equal(dRes.length, 2)
   assert.equal(dRes[1].low, 160)
   assert.equal(dRes[1].high, 160)
+
+  // 6. US equities never roll over or mutate candles on weekends or outside RTH, even if quote claims session: "regular" or omits session
+  const fri30 = [
+    { timestamp: Math.floor(Date.UTC(2026, 10, 20, 20, 0, 0) / 1000), open: 1161.26, high: 1163.58, low: 1147.01, close: 1149.96, volume: 100 },
+    { timestamp: Math.floor(Date.UTC(2026, 10, 20, 20, 30, 0) / 1000), open: 1149.31, high: 1157.00, low: 1132.78, close: 1142.05, volume: 100 }
+  ]
+  const fri1D = [
+    { timestamp: Math.floor(Date.UTC(2026, 10, 19, 14, 30, 0) / 1000), open: 1368.30, high: 1378.06, low: 1288.08, close: 1295.86, volume: 100 },
+    { timestamp: Math.floor(Date.UTC(2026, 10, 20, 14, 30, 0) / 1000), open: 1260.38, high: 1271.13, low: 1132.78, close: 1142.05, volume: 100 }
+  ]
+  const sunEve = new Date(Date.UTC(2026, 10, 22, 23, 23, 0)) // Sun 18:23 ET
+  const monPre = new Date(Date.UTC(2026, 10, 23, 13, 30, 0)) // Mon 08:30 ET
+  const friPost = new Date(Date.UTC(2026, 10, 20, 21, 15, 0)) // Fri 16:15 ET
+  const spoofRegQuote = { symbol: "MPWR", price: 1142.05, regularPrice: 1142.05, session: "regular" }
+  const noSessionQuote = { symbol: "MPWR", price: 1142.05, regularPrice: 1142.05 }
+  assert.equal(Model.updateDevelopingCandle(fri30, spoofRegQuote, "30", sunEve), fri30)
+  assert.equal(Model.updateDevelopingCandle(fri30, spoofRegQuote, "60", sunEve), fri30)
+  assert.equal(Model.updateDevelopingCandle(fri1D, spoofRegQuote, "1D", sunEve), fri1D)
+  assert.equal(Model.updateDevelopingCandle(fri1D, noSessionQuote, "1D", sunEve), fri1D)
+  assert.equal(Model.updateDevelopingCandle(fri1D, spoofRegQuote, "1D", monPre), fri1D)
+  assert.equal(Model.updateDevelopingCandle(fri1D, spoofRegQuote, "1D", friPost), fri1D)
+  assert.equal(Model.stratScenario(fri1D[1], fri1D[0]), "2d")
+
+  // Crypto and Sunday-evening futures still roll over on weekends
+  const btcSun = Model.updateDevelopingCandle(btcBase, { symbol: "BTC-USD", regularPrice: 91500, session: "live" }, "60", sunEve)
+  assert.equal(btcSun.length, 2)
+  const futSun = Model.updateDevelopingCandle(
+    [{ timestamp: Math.floor(Date.UTC(2026, 10, 20, 20, 0, 0) / 1000), open: 6000, high: 6010, low: 5990, close: 6005, volume: 10 }],
+    { symbol: "ES=F", regularPrice: 6020, session: "regular" },
+    "60",
+    sunEve
+  )
+  assert.equal(futSun.length, 2)
+
+  // stratLivePrice does not leak extended/overnight price when regularPrice is absent
+  assert.equal(Model.stratLivePrice({ price: 1150, extendedPrice: 1150, session: "post" }), null)
+  assert.equal(Model.stratLivePrice({ price: 1150, regularPrice: 1142.05, extendedPrice: 1150, session: "post" }), 1142.05)
 })
 
 test("isCandleSeriesStale detects stale prior-session caches during RTH without false positives", () => {

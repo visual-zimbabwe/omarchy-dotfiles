@@ -1988,7 +1988,8 @@ function stratScenario(current, prev) {
 // so the grid's 2s live quote is honored instead of the 15s-stale candle close.
 function stratLivePrice(liveQuote) {
   if (!liveQuote) return null
-  var keys = ["regularMarketPrice", "regularPrice", "price"]
+  var isExtendedSession = liveQuote.session === "pre" || liveQuote.session === "post"
+  var keys = isExtendedSession ? ["regularMarketPrice", "regularPrice"] : ["regularMarketPrice", "regularPrice", "price"]
   for (var i = 0; i < keys.length; i++) {
     var v = finiteOrNull(liveQuote[keys[i]])
     if (v !== null) return v
@@ -6182,6 +6183,7 @@ function marketWeekStartEt(timestampSec) {
 function isUsEquitySessionSymbol(symbol) {
   var sym = normalizeSymbol(symbol);
   if (!sym || isCryptoSymbol(sym)) return false;
+  if (sym.indexOf("=") !== -1) return false;
   if (sym.indexOf(".") !== -1) {
     var parts = sym.split(".");
     var sfx = parts[parts.length - 1].toUpperCase();
@@ -6332,6 +6334,14 @@ function updateDevelopingCandle(candles, quote, rangeKey, nowDate) {
     return candles;
   }
 
+  var now = (nowDate instanceof Date && isFinite(nowDate.getTime())) ? nowDate : new Date();
+  if (quote.symbol && isUsEquitySessionSymbol(quote.symbol)) {
+    var rthSched = getUsSessionSchedule(now, quote);
+    if (rthSched.isWeekend || rthSched.mins < rthSched.openMins - 2 || rthSched.mins > rthSched.closeMins + 2) {
+      return candles;
+    }
+  }
+
   var rawPrice = quote.regularPrice != null ? quote.regularPrice : (quote.regularMarketPrice != null ? quote.regularMarketPrice : (quote.price != null ? quote.price : null));
   var price = finiteOrNull(rawPrice);
   if (price === null) return candles;
@@ -6340,7 +6350,6 @@ function updateDevelopingCandle(candles, quote, rangeKey, nowDate) {
   var lastIdx = list.length - 1;
   var last = Object.assign({}, list[lastIdx]);
   var range = String(rangeKey || "1D");
-  var now = (nowDate instanceof Date) ? nowDate : new Date();
   var nowSec = Math.floor(now.getTime() / 1000);
 
   if (range === "1D" || range === "D" || range === "1d" || range === "day") {
@@ -6569,6 +6578,7 @@ function updateCachedDevelopingCandles(cache, sym, quote, timeframes, nowDate) {
   var changedKeys = [];
   var seen = {};
   var tsNow = nowDate || new Date();
+  var quoteWithSym = quote.symbol ? quote : Object.assign({ symbol: sym }, quote);
   for (var i = 0; i < timeframes.length; i++) {
     var tf = timeframes[i];
     if (!tf || seen[tf]) continue;
@@ -6576,7 +6586,7 @@ function updateCachedDevelopingCandles(cache, sym, quote, timeframes, nowDate) {
     var k = cacheKey(sym, tf);
     var existing = cache[k];
     if (existing && existing.length > 0) {
-      var updated = updateDevelopingCandle(existing, quote, tf, tsNow);
+      var updated = updateDevelopingCandle(existing, quoteWithSym, tf, tsNow);
       if (updated !== existing) {
         cache[k] = updated;
         changedKeys.push(k);

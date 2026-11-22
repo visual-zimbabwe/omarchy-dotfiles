@@ -28,12 +28,12 @@
   "detailRange": "1M",
   "gridMode": "2x2",
   "gridSync": {
-    "broadening": true,
-    "crosshair": false,
-    "setupLines": true,
     "symbol": true,
+    "timeframe": false,
+    "crosshair": false,
     "time": false,
-    "timeframe": false
+    "broadening": true,
+    "setupLines": true
   },
   "gridSymbols": [
     "DDOG",
@@ -245,10 +245,7 @@
   ],
   "discordWebhook": "https://discord.com/api/webhooks/1555025989363310644/M0JepOpRsNNPbR_Ykk_-kgxc8plFo2Mfp7j0t_-Y7dv92osFqVITTKc5NcJ_qYA2v_TR",
   "alertSources": [
-    "SMH",
-    "XLK",
-    "@ENERGY",
-    "@MARKET"
+    "SMH"
   ],
   "alertsAutoOpen": true,
   "alertLog": [

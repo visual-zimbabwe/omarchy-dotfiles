@@ -158,7 +158,7 @@ function normalizeYahooTick(decoded, nowDate) {
       out.changePercent = rawChangePct;
       out.regularChangePercent = rawChangePct;
     }
-  } else if (marketHours === 0 || marketHours === 2 || marketHours === 3) {
+  } else if (marketHours === 0 || marketHours === 2 || marketHours === 3 || marketHours === 4) {
     out.session = marketHours === 0 ? "pre" : "post";
     out.extendedPrice = price;
     out.hasExtended = true;
@@ -168,13 +168,10 @@ function normalizeYahooTick(decoded, nowDate) {
       out.extendedChangePercent = rawChangePct;
     }
   } else {
-    out.session = "regular";
-    out.regularPrice = price;
+    out.session = "closed";
+    out.hasExtended = false;
     if (rawChange !== null) out.change = rawChange;
-    if (rawChangePct !== null) {
-      out.changePercent = rawChangePct;
-      out.regularChangePercent = rawChangePct;
-    }
+    if (rawChangePct !== null) out.changePercent = rawChangePct;
   }
 
   return out;
@@ -763,6 +760,12 @@ function updateTrailingCandleInPlace(candles, quote, tf, nowDate) {
   if (price === null) return candles;
 
   const now = (nowDate instanceof Date && Number.isFinite(nowDate.getTime())) ? nowDate : new Date();
+  if (quote.symbol && Model.isUsEquitySessionSymbol(quote.symbol)) {
+    const rthSched = Model.getUsSessionSchedule(now, quote);
+    if (rthSched.isWeekend || rthSched.mins < rthSched.openMins - 2 || rthSched.mins > rthSched.closeMins + 2) {
+      return candles;
+    }
+  }
   const nowSec = Math.floor(now.getTime() / 1000);
   const last = candles[candles.length - 1];
   if (!last || !Number.isFinite(last.timestamp)) return candles;
