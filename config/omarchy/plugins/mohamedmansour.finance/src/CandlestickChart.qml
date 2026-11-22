@@ -34,6 +34,8 @@ Item {
     readonly property int timeScaleHeight: showTimeScale ? Style.space(18) : 0
     property bool showBroadening: false
     onShowBroadeningChanged: refreshGeometry()
+    property var setupLines: []
+    onSetupLinesChanged: refreshGeometry()
 
     signal crosshairMoved(real timestamp, real price, var candle)
     signal crosshairCleared
@@ -544,6 +546,20 @@ Item {
                             min = pl.price;
                         if (pl.price > max)
                             max = pl.price;
+                    }
+                }
+            }
+        }
+
+        if (root.setupLines && root.setupLines.length > 0) {
+            for (var sli = 0; sli < root.setupLines.length; sli++) {
+                var sl = root.setupLines[sli];
+                if (sl && isFinite(sl.price) && sl.price > 0) {
+                    if (sl.price >= candleMin * 0.85 && sl.price <= candleMax * 1.15) {
+                        if (sl.price < min)
+                            min = sl.price;
+                        if (sl.price > max)
+                            max = sl.price;
                     }
                 }
             }
@@ -1153,6 +1169,80 @@ Item {
                         if (f.lower) drawBFRay(f.lower, false, fi);
                     }
                 }
+
+            // Automatic Triggered Strat Setup Lines (GridWindow Only: all solid; triggers colored by TF, targets green)
+            if (root.setupLines && root.setupLines.length > 0 && g.innerW > 0) {
+                var slIsLight = Model.isLightColor(Color.background);
+                var slPlacedPillYs = [];
+                var slFont = "bold " + Style.font.bodySmall + "px " + quotedFont;
+                var slPadX = Style.space(4);
+                var slPillH = Style.space(14);
+                for (var si = 0; si < root.setupLines.length; si++) {
+                    var sLine = root.setupLines[si];
+                    if (!sLine || !isFinite(sLine.price) || sLine.price <= 0)
+                        continue;
+
+                    var sLyRaw = root.priceToYVal(sLine.price, g);
+                    if (sLyRaw < g.top - Style.space(6) || sLyRaw > g.bot + Style.space(6))
+                        continue;
+
+                    var sAnchorIdx = Model.resolveLevelAnchorIndex(sLine, g.allCandles, root.rangeKey);
+                    var sRawX1 = root.globalIndexToX(sAnchorIdx, g);
+                    var sDrawX1 = Math.max(g.left, Math.min(g.right - Style.space(8), sRawX1));
+                    var sDrawX2 = g.right;
+                    if (sDrawX2 <= sDrawX1)
+                        sDrawX1 = g.left;
+
+                    var sLy = Math.round(sLyRaw) + 0.5;
+                    var sColor = Model.setupLineColor(sLine.timeframe, sLine.kind, slIsLight);
+
+                    ctx.save();
+                    ctx.strokeStyle = sColor;
+                    ctx.lineWidth = 1;
+                    ctx.globalAlpha = 0.92;
+                    if (typeof ctx.setLineDash === "function")
+                        ctx.setLineDash([]);
+                    ctx.beginPath();
+                    ctx.moveTo(Math.round(sDrawX1), sLy);
+                    ctx.lineTo(Math.round(sDrawX2), sLy);
+                    ctx.stroke();
+
+                    var sPriceStr = Model.formatPrice(sLine.price, root.currency, root.priceHint);
+                    var sBaseTxt = (sLine.label !== undefined && sLine.label !== null) ? String(sLine.label).trim() : "";
+                    var sFullLabel = sBaseTxt.length > 0 ? (sBaseTxt + " · " + sPriceStr) : sPriceStr;
+
+                    ctx.font = slFont;
+                    var sTextW = ctx.measureText(sFullLabel).width;
+                    var sPillW = sTextW + slPadX * 2;
+                    var sPillX = Math.max(g.left + Style.space(2), Math.round(sDrawX2 - sPillW - Style.space(2)));
+                    var sPillY = (sLy - slPillH - Style.space(2) >= g.top) ? Math.round(sLy - slPillH - Style.space(2)) : Math.round(sLy + Style.space(2));
+
+                    for (var pi = 0; pi < slPlacedPillYs.length; pi++) {
+                        if (Math.abs(sPillY - slPlacedPillYs[pi]) < slPillH) {
+                            var belowCand = Math.round(sLy + Style.space(2));
+                            var aboveCand = Math.round(slPlacedPillYs[pi] - slPillH - 1);
+                            if (Math.abs(belowCand - slPlacedPillYs[pi]) >= slPillH && belowCand + slPillH <= g.bot)
+                                sPillY = belowCand;
+                            else if (aboveCand >= g.top)
+                                sPillY = aboveCand;
+                            else if (slPlacedPillYs[pi] + slPillH + 1 + slPillH <= g.bot)
+                                sPillY = slPlacedPillYs[pi] + slPillH + 1;
+                        }
+                    }
+                    slPlacedPillYs.push(sPillY);
+
+                    ctx.globalAlpha = 0.84;
+                    ctx.fillStyle = Color.background;
+                    ctx.fillRect(sPillX, sPillY, sPillW, slPillH);
+
+                    ctx.globalAlpha = 1.0;
+                    ctx.fillStyle = sColor;
+                    ctx.textAlign = "left";
+                    ctx.textBaseline = "middle";
+                    ctx.fillText(sFullLabel, sPillX + slPadX, sPillY + slPillH / 2);
+                    ctx.restore();
+                }
+            }
 
             // User-Drawn Trigger / Target Price Level Lines
             if (root.priceLevels && root.priceLevels.length > 0 && g.innerW > 0) {
