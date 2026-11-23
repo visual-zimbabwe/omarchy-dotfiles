@@ -211,7 +211,7 @@ W.register("two-rows-four-columns")
 W.register("custom")
 
 W.set_workspace("1", "lua:omarchy-wsl-golden")
-W.set_workspace("2", "lua:omarchy-wsl-two-rows-four-columns")
+W.set_workspace("2", "lua:omarchy-wsl-grid")
 W.set_workspace("3", "lua:omarchy-wsl-two-rows-four-columns")
 W.set_workspace("4", "lua:omarchy-wsl-two-rows-four-columns")
 W.set_workspace("5", "lua:omarchy-wsl-custom")
