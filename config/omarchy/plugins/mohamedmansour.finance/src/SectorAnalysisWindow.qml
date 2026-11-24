@@ -10,14 +10,30 @@ FloatingWindow {
     id: root
 
     property string sectorSymbol: "SMH"
-    readonly property var sectorInfo: Model.getSectorInfo(root.sectorSymbol)
-    readonly property string sectorFullName: sectorInfo ? sectorInfo.name : ""
+    readonly property var sectorTickers: Model.parseSectorTickers(root.sectorSymbol)
+    readonly property bool isMultiTicker: sectorTickers.length > 1
+    readonly property var sectorInfo: (!root.isMultiTicker && sectorTickers.length > 0) ? Model.getSectorInfo(sectorTickers[0]) : null
+    readonly property string sectorFullName: {
+        if (root.isMultiTicker) {
+            return sectorTickers.length + " Tickers";
+        }
+        if (root.sectorInfo) {
+            return root.sectorInfo.name;
+        }
+        var s = (sectorTickers.length === 1) ? sectorTickers[0] : root.sectorSymbol;
+        var q = root.quotes[s];
+        if (q && (q.shortName || q.longName)) {
+            return q.shortName || q.longName;
+        }
+        return "";
+    }
     property string timeframe: "1W"
     property string scenarioFilter: ""
     property string sortField: "weight" // "weight", "mcap", "price", "change", "atr"
     property bool sortAscending: false
     property bool showBroadening: true
     property bool syncCrosshair: true
+    property int globalBarCount: 140
 
     property int activeTileIndex: 0
     property bool inDrillDown: false
@@ -41,7 +57,11 @@ FloatingWindow {
     signal alertsMuteToggleRequested
     signal symbolLevelsChangedExternally(string sym, var nextLevels)
 
-    title: "Omafinance Sector Analysis - " + root.sectorSymbol + " (" + root.timeframe + ")"
+    title: {
+        var t = root.sectorTickers;
+        var label = (t.length > 1) ? t.join(", ") : root.sectorSymbol;
+        return "Omafinance Sector Analysis - " + label + " (" + root.timeframe + ")";
+    }
     color: Color.background
     implicitWidth: Style.space(1360)
     implicitHeight: Style.space(880)
@@ -54,18 +74,34 @@ FloatingWindow {
     readonly property string fontFamily: Style.font.family
 
     Component.onCompleted: {
-        loadHoldingsForSector(root.sectorSymbol);
+        if (root.isMultiTicker) {
+            root.holdings = [];
+            refreshBatchQuotes();
+            refreshVisibleCharts(false);
+        } else {
+            var s = (root.sectorTickers.length === 1) ? root.sectorTickers[0] : root.sectorSymbol;
+            loadHoldingsForSector(s);
+        }
     }
 
     onSectorSymbolChanged: {
         root.clearLockStack();
-        loadHoldingsForSector(root.sectorSymbol);
+        if (root.isMultiTicker) {
+            root.holdings = [];
+            refreshBatchQuotes();
+            refreshVisibleCharts(false);
+        } else {
+            var s = (root.sectorTickers.length === 1) ? root.sectorTickers[0] : root.sectorSymbol;
+            loadHoldingsForSector(s);
+        }
     }
 
     function getTierHoldingsCount(tierIdx) {
         if (!root.lockStack || tierIdx < 0 || tierIdx >= root.lockStack.length)
             return 0;
         var list = root.lockStack[tierIdx];
+        if (root.isMultiTicker)
+            return list.length;
         var c = 0;
         for (var i = 0; i < list.length; i++) {
             if (list[i] !== root.sectorSymbol)
@@ -77,6 +113,8 @@ FloatingWindow {
     readonly property int activeLockedHoldingsCount: {
         if (!root.activeLockedSymbols)
             return root.totalHoldingsCount;
+        if (root.isMultiTicker)
+            return root.activeLockedSymbols.length;
         var c = 0;
         for (var i = 0; i < root.activeLockedSymbols.length; i++) {
             if (root.activeLockedSymbols[i] !== root.sectorSymbol)
@@ -135,9 +173,12 @@ FloatingWindow {
     }
 
     function setSector(sym) {
-        var norm = Model.normalizeSymbol(sym);
-        if (norm && norm !== root.sectorSymbol) {
-            root.sectorSymbol = norm;
+        var parsed = Model.parseSectorTickers(sym);
+        if (parsed.length > 0) {
+            var joined = parsed.join(",");
+            if (joined !== root.sectorSymbol) {
+                root.sectorSymbol = joined;
+            }
         }
     }
 
@@ -175,13 +216,13 @@ FloatingWindow {
                     var parsed = JSON.parse(raw);
                     if (parsed && Array.isArray(parsed.holdings)) {
                         root.holdings = parsed.holdings;
-                        refreshBatchQuotes();
-                        refreshVisibleCharts(false);
                     }
                 } catch (e) {
                     console.log("[SectorAnalysis] Error parsing holdings:", e);
                 }
             }
+            refreshBatchQuotes();
+            refreshVisibleCharts(false);
         }
         stdout: StdioCollector {
             id: holdingsStdout
@@ -192,14 +233,27 @@ FloatingWindow {
     // Breadth Attack Metrics Calculation (Equal-Weighted, exactly matching Model.computeBasketAttackMetrics)
     readonly property var breadthMetrics: {
         var dailyCandlesMap = {};
-        for (var i = 0; i < root.holdings.length; i++) {
-            var h = root.holdings[i];
-            if (h && h.symbol) {
-                var sym = h.symbol;
+        var targetHoldings = [];
+        var labelSym = root.sectorSymbol;
+        var labelName = root.sectorFullName;
+
+        if (root.isMultiTicker) {
+            for (var i = 0; i < root.sectorTickers.length; i++) {
+                var sym = root.sectorTickers[i];
+                targetHoldings.push({ symbol: sym });
                 dailyCandlesMap[sym] = root.getCandles(sym, root.timeframe);
             }
+        } else {
+            for (var j = 0; j < root.holdings.length; j++) {
+                var h = root.holdings[j];
+                if (h && h.symbol) {
+                    var s = h.symbol;
+                    dailyCandlesMap[s] = root.getCandles(s, root.timeframe);
+                }
+            }
+            targetHoldings = root.holdings;
         }
-        return Model.computeBasketAttackMetrics(root.sectorSymbol, root.sectorFullName, "Sector", root.holdings, dailyCandlesMap, root.quotes, root.timeframe);
+        return Model.computeBasketAttackMetrics(labelSym, labelName, "Sector", targetHoldings, dailyCandlesMap, root.quotes, root.timeframe);
     }
 
     // Filter and Sort Engine (Evaluates against active locked sub-universe if active)
@@ -208,8 +262,40 @@ FloatingWindow {
         var filterQuery = (root.scenarioFilter || "").trim();
         var lockedSyms = root.activeLockedSymbols;
 
-        // 1. Sector ETF Benchmark Tile Candidate
-        var etfSymbol = root.sectorSymbol;
+        if (root.isMultiTicker) {
+            var matchedMulti = [];
+            for (var m = 0; m < root.sectorTickers.length; m++) {
+                var sym = root.sectorTickers[m];
+                if (lockedSyms && lockedSyms.indexOf(sym) === -1)
+                    continue;
+
+                var candles = root.getCandles(sym, root.timeframe);
+                var quote = root.quotes[sym] || null;
+                var matches = true;
+                if (filterQuery.length > 0) {
+                    matches = Model.matchesScenarioQuery(candles, quote, filterQuery);
+                }
+                if (matches) {
+                    var sInfo = Model.getSectorInfo(sym);
+                    var qName = quote ? (quote.shortName || quote.longName || quote.name) : "";
+                    matchedMulti.push({
+                        symbol: sym,
+                        name: sInfo ? sInfo.name : (qName || sym),
+                        isEtf: !!sInfo,
+                        pctVal: 0,
+                        valUSD: 0
+                    });
+                }
+            }
+            if (root.sortField === "weight") {
+                return root.sortAscending ? matchedMulti.slice().reverse() : matchedMulti;
+            } else {
+                return Model.sortSectorHoldings(matchedMulti, root.sortField, root.sortAscending ? "asc" : "desc", root.quotes);
+            }
+        }
+
+        // Single Ticker Mode: Sector ETF Benchmark Tile Candidate
+        var etfSymbol = (root.sectorTickers.length === 1) ? root.sectorTickers[0] : root.sectorSymbol;
         var etfInUniverse = (!lockedSyms || lockedSyms.indexOf(etfSymbol) !== -1);
         if (etfInUniverse) {
             var etfCandles = root.getCandles(etfSymbol, root.timeframe);
@@ -221,7 +307,7 @@ FloatingWindow {
             if (etfMatches) {
                 list.push({
                     symbol: etfSymbol,
-                    name: root.sectorFullName + " (Sector ETF)",
+                    name: root.sectorFullName ? (root.sectorFullName + " (Sector ETF)") : (etfQuote ? (etfQuote.shortName || etfQuote.longName || etfSymbol) : etfSymbol),
                     isEtf: true,
                     pctVal: 100,
                     valUSD: 0
@@ -229,7 +315,7 @@ FloatingWindow {
             }
         }
 
-        // 2. Component Holdings
+        // Single Ticker Mode: Component Holdings
         var matchedHoldings = [];
         for (var i = 0; i < root.holdings.length; i++) {
             var h = root.holdings[i];
@@ -242,16 +328,16 @@ FloatingWindow {
             var cCandles = root.getCandles(cSym, root.timeframe);
             var cQuote = root.quotes[cSym] || null;
 
-            var matches = true;
+            var cMatches = true;
             if (filterQuery.length > 0) {
-                matches = Model.matchesScenarioQuery(cCandles, cQuote, filterQuery);
+                cMatches = Model.matchesScenarioQuery(cCandles, cQuote, filterQuery);
             }
-            if (matches) {
+            if (cMatches) {
                 matchedHoldings.push(h);
             }
         }
 
-        // 3. Sort Component Holdings
+        // Sort Component Holdings
         var sorted = Model.sortSectorHoldings(matchedHoldings, root.sortField, root.sortAscending ? "asc" : "desc", root.quotes);
         for (var j = 0; j < sorted.length; j++) {
             list.push(sorted[j]);
@@ -260,11 +346,20 @@ FloatingWindow {
         return list;
     }
 
-    readonly property int totalHoldingsCount: root.holdings.length
+    readonly property int totalHoldingsCount: {
+        if (root.isMultiTicker) {
+            return root.sectorTickers.length;
+        }
+        return root.holdings.length > 0 ? root.holdings.length : 1;
+    }
+
     readonly property int matchingHoldingsCount: {
+        if (root.isMultiTicker) {
+            return root.filteredTiles.length;
+        }
         var count = 0;
-        for (var i = 0; i < filteredTiles.length; i++) {
-            if (!filteredTiles[i].isEtf)
+        for (var i = 0; i < root.filteredTiles.length; i++) {
+            if (!root.filteredTiles[i].isEtf || root.holdings.length === 0)
                 count++;
         }
         return count;
@@ -272,7 +367,11 @@ FloatingWindow {
 
     // Live Batch Quotes (2-second interval)
     function getAllSymbols() {
-        var syms = [root.sectorSymbol];
+        if (root.isMultiTicker) {
+            return root.sectorTickers;
+        }
+        var singleSym = (root.sectorTickers.length === 1) ? root.sectorTickers[0] : root.sectorSymbol;
+        var syms = singleSym ? [singleSym] : [];
         for (var i = 0; i < root.holdings.length; i++) {
             var h = root.holdings[i];
             if (h && h.symbol && syms.indexOf(h.symbol) === -1)
@@ -602,7 +701,7 @@ FloatingWindow {
         Rectangle {
             id: masterHeader
             width: parent.width
-            height: Style.space(64)
+            height: Style.space(96)
             color: Color.background
             z: 10
 
@@ -611,16 +710,17 @@ FloatingWindow {
                 anchors.leftMargin: Style.space(12)
                 anchors.rightMargin: Style.space(12)
                 anchors.topMargin: Style.space(6)
+                anchors.bottomMargin: Style.space(6)
                 spacing: Style.space(4)
 
-                // Top Controls Row
-                Row {
+                // ROW 1: Sector & BF Toggle
+                Item {
                     width: parent.width
                     height: Style.space(28)
-                    spacing: Style.space(16)
 
-                    // GROUP 1: Target & Context
+                    // Sector Ticker & Name
                     Row {
+                        anchors.left: parent.left
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: Style.space(8)
 
@@ -636,28 +736,44 @@ FloatingWindow {
 
                         // Sector Ticker Switcher
                         Rectangle {
-                            width: Style.space(60)
+                            id: sectorBox
+                            width: Math.max(Style.space(60), Math.min(Style.space(260), sectorInput.contentWidth + Style.space(16)))
                             height: Style.space(24)
                             radius: Style.space(4)
                             color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
                             border.color: sectorInput.activeFocus ? Color.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.20)
                             border.width: 1
                             anchors.verticalCenter: parent.verticalCenter
+                            clip: true
 
                             TextInput {
                                 id: sectorInput
                                 anchors.fill: parent
-                                horizontalAlignment: TextInput.AlignHCenter
+                                anchors.leftMargin: Style.space(6)
+                                anchors.rightMargin: Style.space(6)
+                                horizontalAlignment: (contentWidth > (width - Style.space(12))) ? TextInput.AlignLeft : TextInput.AlignHCenter
                                 verticalAlignment: TextInput.AlignVCenter
+                                clip: true
                                 text: root.sectorSymbol
                                 color: root.foreground
                                 font.family: root.fontFamily
                                 font.pixelSize: Style.font.bodySmall
                                 font.bold: true
+                                font.capitalization: Font.AllUppercase
+                                inputMethodHints: Qt.ImhUppercaseOnly | Qt.ImhNoPredictiveText
                                 selectByMouse: true
 
+                                onTextEdited: {
+                                    var curPos = cursorPosition;
+                                    var upper = text.toUpperCase();
+                                    if (text !== upper) {
+                                        text = upper;
+                                        cursorPosition = curPos;
+                                    }
+                                }
+
                                 onAccepted: {
-                                    var val = text.trim();
+                                    var val = text.trim().toUpperCase();
                                     if (val.length > 0) {
                                         root.setSector(val);
                                     }
@@ -667,11 +783,13 @@ FloatingWindow {
 
                                 onActiveFocusChanged: {
                                     if (!activeFocus) {
-                                        var val = text.trim();
+                                        var val = text.trim().toUpperCase();
                                         if (val.length > 0) {
                                             root.setSector(val);
                                         }
                                         text = root.sectorSymbol;
+                                    } else {
+                                        selectAll();
                                     }
                                 }
 
@@ -693,14 +811,12 @@ FloatingWindow {
 
                             MouseArea {
                                 anchors.fill: parent
+                                z: 2
+                                acceptedButtons: Qt.RightButton
                                 cursorShape: Qt.PointingHandCursor
-                                acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 onClicked: function (mouse) {
                                     if (mouse.button === Qt.RightButton) {
                                         root.toggleSector();
-                                    } else {
-                                        sectorInput.text = "";
-                                        sectorInput.forceActiveFocus();
                                     }
                                 }
                             }
@@ -710,6 +826,7 @@ FloatingWindow {
                         Text {
                             textFormat: Text.PlainText
                             text: root.sectorFullName
+                            visible: root.sectorFullName.length > 0
                             color: root.dim
                             font.family: root.fontFamily
                             font.pixelSize: Style.font.caption
@@ -717,25 +834,50 @@ FloatingWindow {
                             width: Math.min(implicitWidth, Style.space(260))
                             anchors.verticalCenter: parent.verticalCenter
                         }
+                    }
+
+                    // Global Broadening Formations Toggle (far right on row 1)
+                    Rectangle {
+                        id: bfBtn
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        height: Style.space(24)
+                        implicitWidth: bfText.implicitWidth + Style.space(14)
+                        radius: Style.space(4)
+                        color: root.showBroadening ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+                        border.color: root.showBroadening ? Color.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.20)
+                        border.width: 1
 
                         Text {
+                            id: bfText
+                            anchors.centerIn: parent
                             textFormat: Text.PlainText
-                            text: "·"
-                            color: root.dim
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-
-                        // Timeframe Selector
-                        Text {
-                            textFormat: Text.PlainText
-                            text: "TIMEFRAME:"
-                            color: root.dim
+                            text: "BF: " + (root.showBroadening ? "ON" : "OFF")
+                            color: root.showBroadening ? Color.accent : root.dim
                             font.family: root.fontFamily
-                            font.pixelSize: Style.font.bodySmall
+                            font.pixelSize: Style.font.caption
                             font.bold: true
-                            anchors.verticalCenter: parent.verticalCenter
                         }
 
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.showBroadening = !root.showBroadening
+                        }
+                    }
+                }
+
+                // ROW 2: Timeframe, Sort, Scenario, Lock, and Bars (far right)
+                Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    Row {
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Style.space(12)
+
+                        // Timeframe Buttons (without "TIMEFRAME:" text)
                         Row {
                             spacing: Style.space(4)
                             anchors.verticalCenter: parent.verticalCenter
@@ -768,83 +910,118 @@ FloatingWindow {
                                 }
                             }
                         }
-                    }
 
-                    // GROUP 2: Strat Filtering & Controls
-                    Row {
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: Style.space(8)
-
-                        Text {
-                            textFormat: Text.PlainText
-                            text: "SCENARIO:"
-                            color: root.dim
-                            font.family: root.fontFamily
-                            font.pixelSize: Style.font.bodySmall
-                            font.bold: true
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-
-                        // Scenario Filter Input (/ shortcut)
+                        // Sort Selector Button
                         Rectangle {
-                            width: Style.space(200)
                             height: Style.space(24)
+                            implicitWidth: sortText.implicitWidth + Style.space(16)
                             radius: Style.space(4)
                             color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
-                            border.color: scenarioField.activeFocus ? Color.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.20)
+                            border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.20)
                             border.width: 1
                             anchors.verticalCenter: parent.verticalCenter
 
-                            TextInput {
-                                id: scenarioField
-                                anchors.fill: parent
-                                anchors.leftMargin: Style.space(6)
-                                anchors.rightMargin: Style.space(20)
-                                verticalAlignment: TextInput.AlignVCenter
-                                text: root.scenarioFilter
+                            Text {
+                                id: sortText
+                                anchors.centerIn: parent
+                                textFormat: Text.PlainText
+                                text: "SORT: " + root.sortField.toUpperCase() + (root.sortAscending ? " ↑" : " ↓")
                                 color: root.foreground
                                 font.family: root.fontFamily
                                 font.pixelSize: Style.font.caption
-                                selectByMouse: true
+                                font.bold: true
+                            }
 
-                                onTextChanged: {
-                                    filterDebounceTimer.restart();
-                                }
-                                Keys.onPressed: function (ev) {
-                                    if (ev.key === Qt.Key_Down || ev.key === Qt.Key_Tab) {
-                                        keyboardListener.forceActiveFocus();
-                                        ev.accepted = true;
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: function (mouse) {
+                                    if (mouse.button === Qt.RightButton) {
+                                        root.cycleSortField();
+                                    } else {
+                                        root.toggleSortDirection();
                                     }
                                 }
                             }
+                        }
+
+                        // Scenario Filter
+                        Row {
+                            spacing: Style.space(8)
+                            anchors.verticalCenter: parent.verticalCenter
 
                             Text {
-                                visible: root.scenarioFilter.length === 0 && !scenarioField.activeFocus
-                                text: "1, hammer, 2dg... (/)"
-                                color: Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.5)
+                                textFormat: Text.PlainText
+                                text: "SCENARIO:"
+                                color: root.dim
                                 font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
-                                anchors.left: parent.left
-                                anchors.leftMargin: Style.space(6)
+                                font.pixelSize: Style.font.bodySmall
+                                font.bold: true
                                 anchors.verticalCenter: parent.verticalCenter
                             }
 
-                            Text {
-                                visible: root.scenarioFilter.length > 0
-                                text: "✕"
-                                color: root.dim
-                                font.pixelSize: Style.font.caption
-                                anchors.right: parent.right
-                                anchors.rightMargin: Style.space(6)
+                            // Scenario Filter Input (/ shortcut)
+                            Rectangle {
+                                width: Style.space(200)
+                                height: Style.space(24)
+                                radius: Style.space(4)
+                                color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+                                border.color: scenarioField.activeFocus ? Color.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.20)
+                                border.width: 1
                                 anchors.verticalCenter: parent.verticalCenter
 
-                                MouseArea {
+                                TextInput {
+                                    id: scenarioField
                                     anchors.fill: parent
-                                    anchors.margins: -Style.space(4)
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        scenarioField.text = "";
-                                        root.scenarioFilter = "";
+                                    anchors.leftMargin: Style.space(6)
+                                    anchors.rightMargin: Style.space(20)
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    text: root.scenarioFilter
+                                    color: root.foreground
+                                    font.family: root.fontFamily
+                                    font.pixelSize: Style.font.caption
+                                    selectByMouse: true
+
+                                    onTextChanged: {
+                                        filterDebounceTimer.restart();
+                                    }
+                                    Keys.onPressed: function (ev) {
+                                        if (ev.key === Qt.Key_Down || ev.key === Qt.Key_Tab) {
+                                            keyboardListener.forceActiveFocus();
+                                            ev.accepted = true;
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    visible: root.scenarioFilter.length === 0 && !scenarioField.activeFocus
+                                    text: "1, hammer, 2dg... (/)"
+                                    color: Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.5)
+                                    font.family: root.fontFamily
+                                    font.pixelSize: Style.font.caption
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: Style.space(6)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                Text {
+                                    visible: root.scenarioFilter.length > 0
+                                    text: "✕"
+                                    color: root.dim
+                                    font.pixelSize: Style.font.caption
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: Style.space(6)
+                                    anchors.verticalCenter: parent.verticalCenter
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        anchors.margins: -Style.space(4)
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            scenarioField.text = "";
+                                            root.scenarioFilter = "";
+                                        }
                                     }
                                 }
                             }
@@ -998,80 +1175,100 @@ FloatingWindow {
                                 onClicked: root.pushLockTier()
                             }
                         }
+                    }
 
-                        // Sort Selector Button
+                    // Bar Count Selector (far right on row 2)
+                    Row {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Style.space(6)
+
+                        Text {
+                            textFormat: Text.PlainText
+                            text: "BARS:"
+                            color: root.dim
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.bodySmall
+                            font.bold: true
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
                         Rectangle {
+                            id: barsBox
+                            width: Style.space(48)
                             height: Style.space(24)
-                            implicitWidth: sortText.implicitWidth + Style.space(16)
                             radius: Style.space(4)
                             color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
-                            border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.20)
+                            border.color: barsInput.activeFocus ? Color.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.20)
                             border.width: 1
                             anchors.verticalCenter: parent.verticalCenter
 
-                            Text {
-                                id: sortText
-                                anchors.centerIn: parent
-                                textFormat: Text.PlainText
-                                text: "SORT: " + root.sortField.toUpperCase() + (root.sortAscending ? " ↑" : " ↓")
+                            TextInput {
+                                id: barsInput
+                                anchors.fill: parent
+                                anchors.leftMargin: Style.space(4)
+                                anchors.rightMargin: Style.space(4)
+                                horizontalAlignment: TextInput.AlignHCenter
+                                verticalAlignment: TextInput.AlignVCenter
+                                text: "" + root.globalBarCount
                                 color: root.foreground
                                 font.family: root.fontFamily
                                 font.pixelSize: Style.font.caption
-                                font.bold: true
-                            }
+                                selectByMouse: true
+                                inputMethodHints: Qt.ImhDigitsOnly
+                                validator: RegularExpressionValidator { regularExpression: /[0-9]*/ }
 
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                onClicked: function (mouse) {
-                                    if (mouse.button === Qt.RightButton) {
-                                        root.cycleSortField();
+                                onTextChanged: {
+                                    if (activeFocus) {
+                                        barDebounceTimer.restart();
+                                    }
+                                }
+
+                                onActiveFocusChanged: {
+                                    if (activeFocus) {
+                                        selectAll();
                                     } else {
-                                        root.toggleSortDirection();
+                                        barsInput.text = "" + root.globalBarCount;
+                                    }
+                                }
+
+                                Keys.onPressed: function (ev) {
+                                    if (ev.key === Qt.Key_Return || ev.key === Qt.Key_Enter || ev.key === Qt.Key_Escape) {
+                                        keyboardListener.forceActiveFocus();
+                                        ev.accepted = true;
                                     }
                                 }
                             }
-                        }
 
-                        // Global Broadening Formations Toggle
-                        Rectangle {
-                            height: Style.space(24)
-                            implicitWidth: bfText.implicitWidth + Style.space(14)
-                            radius: Style.space(4)
-                            color: root.showBroadening ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
-                            border.color: root.showBroadening ? Color.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.20)
-                            border.width: 1
-                            anchors.verticalCenter: parent.verticalCenter
-
-                            Text {
-                                id: bfText
-                                anchors.centerIn: parent
-                                textFormat: Text.PlainText
-                                text: "BF: " + (root.showBroadening ? "ON" : "OFF")
-                                color: root.showBroadening ? Color.accent : root.dim
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
-                                font.bold: true
+                            Binding {
+                                target: barsInput
+                                property: "text"
+                                value: "" + root.globalBarCount
+                                when: !barsInput.activeFocus
                             }
 
                             MouseArea {
                                 anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.showBroadening = !root.showBroadening
+                                cursorShape: Qt.IBeamCursor
+                                enabled: !barsInput.activeFocus
+                                onClicked: {
+                                    barsInput.forceActiveFocus();
+                                    barsInput.selectAll();
+                                }
                             }
                         }
                     }
                 }
 
-                // GROUP 3: Breadth HUD & Showing Counter
-                Row {
+                // ROW 3: Breadth HUD & Showing Counter
+                Item {
                     width: parent.width
                     height: Style.space(20)
 
                     Row {
-                        spacing: Style.space(8)
+                        anchors.left: parent.left
                         anchors.verticalCenter: parent.verticalCenter
+                        spacing: Style.space(8)
 
                         Text {
                             textFormat: Text.PlainText
@@ -1135,22 +1332,139 @@ FloatingWindow {
                                 font.pixelSize: Style.font.caption
                             }
                         }
+
+                        Text {
+                            textFormat: Text.PlainText
+                            text: "|"
+                            color: Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.3)
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        // 1 Metric (Inside Bar)
+                        Row {
+                            spacing: Style.space(3)
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            Text {
+                                textFormat: Text.PlainText
+                                text: "1: " + Math.round(root.breadthMetrics.pct1 || 0) + "%"
+                                color: root.foreground
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption
+                                font.bold: true
+                            }
+
+                            Text {
+                                textFormat: Text.PlainText
+                                text: (root.breadthMetrics.count1 || 0) + "/" + root.breadthMetrics.totalHoldings
+                                color: root.dim
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption
+                            }
+                        }
+
+                        Text {
+                            textFormat: Text.PlainText
+                            text: "|"
+                            color: Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.3)
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        // 3 Metric (Outside Bar)
+                        Row {
+                            spacing: Style.space(3)
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            Text {
+                                textFormat: Text.PlainText
+                                text: "3: " + Math.round(root.breadthMetrics.pct3 || 0) + "%"
+                                color: root.foreground
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption
+                                font.bold: true
+                            }
+
+                            Text {
+                                textFormat: Text.PlainText
+                                text: (root.breadthMetrics.count3 || 0) + "/" + root.breadthMetrics.totalHoldings
+                                color: root.dim
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption
+                            }
+                        }
+
+                        Text {
+                            textFormat: Text.PlainText
+                            text: "|"
+                            color: Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.3)
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        // F2u Metric (Failed 2u Reversal)
+                        Row {
+                            spacing: Style.space(3)
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            Text {
+                                textFormat: Text.PlainText
+                                text: "F2u: " + Math.round(root.breadthMetrics.pctF2u || 0) + "%"
+                                color: (root.breadthMetrics.pctF2u || 0) >= 20 ? root.downColor : root.foreground
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption
+                                font.bold: true
+                            }
+
+                            Text {
+                                textFormat: Text.PlainText
+                                text: (root.breadthMetrics.countF2u || 0) + "/" + root.breadthMetrics.totalHoldings
+                                color: root.dim
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption
+                            }
+                        }
+
+                        Text {
+                            textFormat: Text.PlainText
+                            text: "|"
+                            color: Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.3)
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        // F2d Metric (Failed 2d Reversal)
+                        Row {
+                            spacing: Style.space(3)
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            Text {
+                                textFormat: Text.PlainText
+                                text: "F2d: " + Math.round(root.breadthMetrics.pctF2d || 0) + "%"
+                                color: (root.breadthMetrics.pctF2d || 0) >= 20 ? root.upColor : root.foreground
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption
+                                font.bold: true
+                            }
+
+                            Text {
+                                textFormat: Text.PlainText
+                                text: (root.breadthMetrics.countF2d || 0) + "/" + root.breadthMetrics.totalHoldings
+                                color: root.dim
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption
+                            }
+                        }
                     }
 
-                    Item {
-                        width: Math.max(0, parent.width - parent.children[0].implicitWidth - showingTextItem.implicitWidth)
-                        height: 1
-                    }
-
-                    // Showing Count
+                    // Showing Count (far right on row 3)
                     Item {
                         id: showingTextItem
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
                         implicitWidth: showingText.implicitWidth
                         implicitHeight: showingText.implicitHeight
-                        anchors.verticalCenter: parent.verticalCenter
 
                         Text {
                             id: showingText
+                            anchors.centerIn: parent
                             textFormat: Text.PlainText
                             text: root.lockStack.length > 0 ? ("Showing: " + root.matchingHoldingsCount + "/" + root.activeLockedHoldingsCount + " (Locked)") : ("Showing: " + root.matchingHoldingsCount + "/" + root.totalHoldingsCount)
                             color: root.lockStack.length > 0 ? Color.accent : root.dim
@@ -1224,6 +1538,7 @@ FloatingWindow {
                                 showBroadening: root.showBroadening
                                 hideStratBadge: true
                                 activeFocusCell: root.activeTileIndex === tileWrapper.index
+                                zoomCount: root.globalBarCount
 
                                 quote: root.quotes[tileWrapper.modelData.symbol] || null
                                 candles: root.getCandles(tileWrapper.modelData.symbol, root.timeframe)
@@ -1247,6 +1562,11 @@ FloatingWindow {
                                 onCrosshairCleared: {
                                     if (root.syncCrosshair) {
                                         root.clearCrosshair();
+                                    }
+                                }
+                                onZoomChangedManually: function (idx, nextZoom) {
+                                    if (nextZoom >= 8 && root.globalBarCount !== nextZoom) {
+                                        root.globalBarCount = nextZoom;
                                     }
                                 }
                             }
@@ -1336,10 +1656,16 @@ FloatingWindow {
                                 symbol: root.drillDownSymbol
                                 timeframe: "30"
                                 showBroadening: root.showBroadening
+                                zoomCount: root.globalBarCount
                                 quote: root.quotes[root.drillDownSymbol] || null
                                 candles: root.getCandles(root.drillDownSymbol, "30")
                                 hourlyCandles: root.getCandles(root.drillDownSymbol, "60")
                                 dailyCandles: root.getCandles(root.drillDownSymbol, "1D")
+                                onZoomChangedManually: function (idx, nextZoom) {
+                                    if (nextZoom >= 8 && root.globalBarCount !== nextZoom) {
+                                        root.globalBarCount = nextZoom;
+                                    }
+                                }
                             }
 
                             GridCell {
@@ -1349,10 +1675,16 @@ FloatingWindow {
                                 symbol: root.drillDownSymbol
                                 timeframe: "60"
                                 showBroadening: root.showBroadening
+                                zoomCount: root.globalBarCount
                                 quote: root.quotes[root.drillDownSymbol] || null
                                 candles: root.getCandles(root.drillDownSymbol, "60")
                                 hourlyCandles: root.getCandles(root.drillDownSymbol, "60")
                                 dailyCandles: root.getCandles(root.drillDownSymbol, "1D")
+                                onZoomChangedManually: function (idx, nextZoom) {
+                                    if (nextZoom >= 8 && root.globalBarCount !== nextZoom) {
+                                        root.globalBarCount = nextZoom;
+                                    }
+                                }
                             }
                         }
 
@@ -1369,10 +1701,16 @@ FloatingWindow {
                                 symbol: root.drillDownSymbol
                                 timeframe: "1D"
                                 showBroadening: root.showBroadening
+                                zoomCount: root.globalBarCount
                                 quote: root.quotes[root.drillDownSymbol] || null
                                 candles: root.getCandles(root.drillDownSymbol, "1D")
                                 hourlyCandles: root.getCandles(root.drillDownSymbol, "60")
                                 dailyCandles: root.getCandles(root.drillDownSymbol, "1D")
+                                onZoomChangedManually: function (idx, nextZoom) {
+                                    if (nextZoom >= 8 && root.globalBarCount !== nextZoom) {
+                                        root.globalBarCount = nextZoom;
+                                    }
+                                }
                             }
 
                             GridCell {
@@ -1382,10 +1720,16 @@ FloatingWindow {
                                 symbol: root.drillDownSymbol
                                 timeframe: "1W"
                                 showBroadening: root.showBroadening
+                                zoomCount: root.globalBarCount
                                 quote: root.quotes[root.drillDownSymbol] || null
                                 candles: root.getCandles(root.drillDownSymbol, "1W")
                                 hourlyCandles: root.getCandles(root.drillDownSymbol, "60")
                                 dailyCandles: root.getCandles(root.drillDownSymbol, "1D")
+                                onZoomChangedManually: function (idx, nextZoom) {
+                                    if (nextZoom >= 8 && root.globalBarCount !== nextZoom) {
+                                        root.globalBarCount = nextZoom;
+                                    }
+                                }
                             }
 
                             GridCell {
@@ -1395,10 +1739,16 @@ FloatingWindow {
                                 symbol: root.drillDownSymbol
                                 timeframe: "1M"
                                 showBroadening: root.showBroadening
+                                zoomCount: root.globalBarCount
                                 quote: root.quotes[root.drillDownSymbol] || null
                                 candles: root.getCandles(root.drillDownSymbol, "1M")
                                 hourlyCandles: root.getCandles(root.drillDownSymbol, "60")
                                 dailyCandles: root.getCandles(root.drillDownSymbol, "1D")
+                                onZoomChangedManually: function (idx, nextZoom) {
+                                    if (nextZoom >= 8 && root.globalBarCount !== nextZoom) {
+                                        root.globalBarCount = nextZoom;
+                                    }
+                                }
                             }
                         }
                     }
@@ -1414,6 +1764,24 @@ FloatingWindow {
         onTriggered: {
             root.scenarioFilter = scenarioField.text;
             root.activeTileIndex = 0;
+        }
+    }
+
+    Timer {
+        id: barDebounceTimer
+        interval: 120
+        repeat: false
+        onTriggered: {
+            var raw = barsInput.text.trim();
+            if (raw.length === 0)
+                return;
+            var num = parseInt(raw, 10);
+            if (!isNaN(num)) {
+                var clamped = Math.max(8, num);
+                if (root.globalBarCount !== clamped) {
+                    root.globalBarCount = clamped;
+                }
+            }
         }
     }
 }
