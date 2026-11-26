@@ -7,13 +7,56 @@ supports Season Pack / Episode selection, MPV playlist playback, and streams ins
 
 import sys
 import os
+import asyncio
+import base64
+import hashlib
+import random
+import socket
+import struct
 import subprocess
+import threading
+import urllib.error
 import urllib.request
 import urllib.parse
 import json
 import re
 import shutil
 import concurrent.futures
+import xml.etree.ElementTree as ET
+import time
+import tempfile
+import atexit
+from pathlib import Path
+
+LIVE_UDP_TRACKERS = [
+    "udp://tracker.opentrackr.org:1337/announce",
+    "udp://open.stealth.si:80/announce",
+    "udp://open.demonii.com:1337/announce",
+    "udp://tracker.dler.org:6969/announce",
+    "udp://tracker.bittor.pw:1337/announce",
+    "udp://explodie.org:6969/announce",
+    "udp://open.tracker.cl:1337/announce",
+    "udp://tracker.internetwarriors.net:1337/announce",
+]
+
+EXTRA_HTTP_TRACKERS = [
+    "http://nyaa.tracker.wf:7777/announce",
+    "https://tracker.tamersunion.org:443/announce",
+]
+
+PUBLIC_TRACKERS = LIVE_UDP_TRACKERS + EXTRA_HTTP_TRACKERS
+
+UDP_PROTOCOL_ID = 0x41727101980
+MAX_UDP_SCRAPE_BATCH = 70
+NYAA_SCRAPE_URL = "http://nyaa.tracker.wf:7777/scrape"
+_VALID_FULL_LAST_BYTES = {0x80, 0xC0, 0xE0, 0xF0, 0xF8, 0xFC, 0xFE, 0xFF}
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+_PEER_COUNT_RE = re.compile(r"from\s+(\d+)\s+peer", re.IGNORECASE)
+
+VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".mov", ".webm", ".m4v", ".ts", ".m2ts", ".flv", ".wmv", ".mpg", ".mpeg"}
+SUB_EXTS = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".tif", ".avif", ".svg"}
+ARCHIVE_EXTS = {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".iso", ".img"}
 
 HELP_TEXT = """\033[1;36m
   🎬 watchtv - CLI Movie & TV Show Streamer
@@ -23,6 +66,7 @@ Usage:
   \033[1;32mwatchtv <query> -e <ep>\033[0m            Target specific episode (e.g. watchtv "bad sisters s01" -e 3)
   \033[1;32mwatchtv <query> -p\033[0m                 Stream entire season as an MPV playlist (use < and > to skip)
   \033[1;32mwatchtv -s <magnet-link>\033[0m           Stream a magnet link directly
+  \033[1;32mwatchtv prowlarr\033[0m                   Open Prowlarr Indexers web UI to add/manage indexers
   \033[1;32mwatchtv <query> -o ~/Videos/\033[0m       Save the video to disk while watching
   \033[1;32mwatchtv <query> -n 50\033[0m              Set max results to display (default: 25)
   \033[1;32mwatchtv --help\033[0m                     Show this help message
@@ -31,6 +75,13 @@ Options:
   \033[1;33m-e, --episode <num>\033[0m    Target a specific episode number
   \033[1;33m-p, --playlist\033[0m         Open all episodes in MPV as a playlist
   \033[1;33m-i, --interactive\033[0m      Interactively choose episode file from season pack
+  \033[1;33m--min-seeds <num>\033[0m      Minimum live seeders required (default: 2)
+  \033[1;33m--all\033[0m                  Include dead (0-seed) and 1-seed torrents
+  \033[1;33m--no-probe\033[0m             Skip automatic TCP peer-reachability probe on top 5
+  \033[1;33m--probe-top <num>\033[0m      Number of top results to auto-probe (default: 5)
+  \033[1;33m--prowlarr\033[0m             Open Prowlarr Indexers web UI in your browser
+  \033[1;33m--prowlarr-only\033[0m        Search only Prowlarr indexers (skip built-in 7)
+  \033[1;33m--no-prowlarr\033[0m          Skip Prowlarr (use only built-in 7 providers)
   \033[1;33m--peerflix\033[0m             Use Peerflix engine instead of WebTorrent
   \033[1;33m-o, --out <dir>\033[0m        Save video permanently to destination folder
   \033[1;33m-n, --limit <num>\033[0m      Max search results to list
@@ -50,10 +101,41 @@ Tips for Best Results:
 """
 
 def sanitize_query(query_parts):
-    query = " ".join(query_parts)
-    cleaned = re.sub(r"['\":?!,]", "", query)
+    query = " ".join(query_parts).strip()
+    if not query:
+        return ""
+    # Remove apostrophes cleanly ("Grey's" -> "Greys", "It's" -> "Its")
+    query = re.sub(r"['’`]", "", query)
+    # Normalize "Season X Episode Y" / "s1 e2" -> "S01E02"
+    query = re.sub(
+        r"\b(?:season|s)\s*(\d{1,2})\s*(?:episode|ep|e|x)\s*(\d{1,3})\b",
+        lambda m: f"S{int(m.group(1)):02d}E{int(m.group(2)):02d}",
+        query,
+        flags=re.IGNORECASE,
+    )
+    # Normalize "1x05" -> "S01E05"
+    query = re.sub(
+        r"\b(\d{1,2})x(\d{1,3})\b",
+        lambda m: f"S{int(m.group(1)):02d}E{int(m.group(2)):02d}",
+        query,
+        flags=re.IGNORECASE,
+    )
+    # Normalize compact "s1e2" -> "S01E02"
+    query = re.sub(
+        r"\b[sS](\d{1,2})[eE](\d{1,3})\b",
+        lambda m: f"S{int(m.group(1)):02d}E{int(m.group(2)):02d}",
+        query,
+    )
+    cleaned = re.sub(r"[^\w\s\-.]", " ", query)
+    cleaned = re.sub(r"[\-_]+", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
+
+def generate_search_variants(query):
+    variants = [query]
+    if re.search(r"\bS\d{2}E\d{2}\b", query, re.IGNORECASE):
+        variants.append(query.replace(" ", "."))
+    return list(dict.fromkeys(v for v in variants if v))
 
 def format_size(bytes_val):
     try:
@@ -77,10 +159,12 @@ def is_season_pack(name: str) -> bool:
             return True
     return False
 
-def highlight_name(name):
+def highlight_name(name, show_pack_tag=True):
     # Highlight useful tags for easy reading
     formatted = name
-    if is_season_pack(name):
+    if show_pack_tag and re.search(r"(?i)(?:^|[\s.\-_\[])(rar|zip|7z|tar\.gz|iso)(?:$|[\s.\-_\]])", name):
+        formatted = f"\033[1;41;97m[ARCHIVE]\033[0m {formatted}"
+    if show_pack_tag and is_season_pack(name):
         formatted = f"\033[1;45;97m[SEASON PACK]\033[0m {formatted}"
 
     formatted = re.sub(r"(?i)\b(multi|multisubs?)\b", "\033[1;33m\\1\033[0m", formatted)
@@ -105,41 +189,64 @@ def normalize_text(text):
 def calculate_match_score(release_name, query, target_episode=None):
     norm_release = normalize_text(release_name)
     norm_query = normalize_text(query)
-    
+
     release_words = norm_release.split()
     query_words = norm_query.split()
-    
+
     if not query_words:
         return 0.0
-        
-    sig_query_words = [w for w in query_words if w not in STOP_WORDS]
-    if not sig_query_words:
-        sig_query_words = query_words
-        
+
+    # Separate season/episode token and optional 4-digit year from core title keywords
+    se_match = re.search(r"\bs(\d{1,2})e(\d{1,3})\b", norm_query)
+    year_match = re.search(r"\b(19\d\d|20\d\d)\b", norm_query)
+    se_token = se_match.group(0) if se_match else None
+    year_token = year_match.group(1) if year_match else None
+
+    core_words = [
+        w for w in query_words
+        if w not in STOP_WORDS and w != se_token and w != year_token
+    ]
+    if not core_words:
+        core_words = [w for w in query_words if w not in STOP_WORDS] or query_words
+
     matched_count = 0
-    for q_word in sig_query_words:
+    for q_word in core_words:
         stem = q_word[:-1] if q_word.endswith("s") and len(q_word) > 3 else q_word
         if any(stem == rw or rw.startswith(stem) or stem in rw for rw in release_words):
             matched_count += 1
-            
-    if matched_count < len(sig_query_words):
+
+    # Require >= 75% title keyword match (100% for 1-3 word queries, allows 1 missing word on 4+ word queries)
+    if (matched_count / len(core_words)) < 0.75:
         return 0.0
-        
+
     score = 10.0
+
+    # Season/Episode check: allow exact episode OR matching season pack (S01 / Season 1)
+    if se_match:
+        s_num = int(se_match.group(1))
+        e_num = int(se_match.group(2))
+        ep_re = rf"(?:s0?{s_num}\.?e0?{e_num}\b|0?{s_num}x0?{e_num}\b)"
+        season_pack_re = rf"(?:s0?{s_num}\b|season\s*0?{s_num}\b)"
+        if re.search(ep_re, release_name, re.IGNORECASE):
+            score += 150.0
+        elif re.search(season_pack_re, release_name, re.IGNORECASE) and is_season_pack(release_name):
+            score += 60.0
+        else:
+            return 0.0
+
     query_phrase = " ".join(query_words)
-    sig_phrase = " ".join(sig_query_words)
-    
+    core_phrase = " ".join(core_words)
+
     if query_phrase in norm_release:
         score += 100.0
-    elif sig_phrase in norm_release:
+    elif core_phrase in norm_release:
         score += 80.0
     else:
-        stemmed_sig_phrase = " ".join([w[:-1] if w.endswith("s") and len(w) > 3 else w for w in sig_query_words])
-        if stemmed_sig_phrase in norm_release:
+        stemmed_core = " ".join([w[:-1] if w.endswith("s") and len(w) > 3 else w for w in core_words])
+        if stemmed_core in norm_release:
             score += 70.0
-            
-    year_match = re.search(r"\b(19\d\d|20\d\d)\b", norm_query)
-    if year_match and year_match.group(1) in norm_release:
+
+    if year_token and year_token in norm_release:
         score += 40.0
 
     # Season pack bonus when searching for seasons
@@ -148,13 +255,17 @@ def calculate_match_score(release_name, query, target_episode=None):
 
     # Target episode bonus
     if target_episode:
-        ep_patterns = [
-            f"e{int(target_episode):02d}",
-            f"e{int(target_episode)}",
-            f"episode {int(target_episode)}",
-        ]
-        if any(ep in norm_release for ep in ep_patterns):
-            score += 150.0
+        try:
+            ep_int = int(target_episode)
+            ep_patterns = [
+                f"e{ep_int:02d}",
+                f"e{ep_int}",
+                f"episode {ep_int}",
+            ]
+            if any(ep in norm_release for ep in ep_patterns):
+                score += 150.0
+        except ValueError:
+            pass
 
     return score
 
@@ -181,9 +292,11 @@ def fetch_apibay(query, target_episode=None):
                         results.append({
                             "name": name,
                             "info_hash": info_hash,
-                            "seeders": int(item.get("seeders", 0)),
-                            "size": int(item.get("size", 0)),
+                            "seeders": int(item.get("seeders", 0) or 0),
+                            "leechers": int(item.get("leechers", 0) or 0),
+                            "size": int(item.get("size", 0) or 0),
                             "score": score,
+                            "source": "TPB",
                         })
                 return results
     except Exception:
@@ -192,7 +305,7 @@ def fetch_apibay(query, target_episode=None):
 
 def fetch_solidtorrents(query, target_episode=None):
     try:
-        url = f"https://solidtorrents.to/api/v1/search?q={urllib.parse.quote(query)}&category=video"
+        url = f"https://solidtorrents.to/api/v1/search?q={urllib.parse.quote(query)}&sort=seeders"
         req = urllib.request.Request(
             url,
             headers={
@@ -213,18 +326,70 @@ def fetch_solidtorrents(query, target_episode=None):
                     results.append({
                         "name": name,
                         "info_hash": info_hash,
-                        "seeders": int(item.get("seeders", 0)),
-                        "size": int(item.get("size", 0)),
+                        "seeders": int(item.get("seeders", 0) or 0),
+                        "leechers": int(item.get("leechers", 0) or 0),
+                        "size": int(item.get("size", 0) or 0),
                         "score": score,
+                        "source": "Solid",
                     })
             return results
     except Exception:
         pass
     return []
 
+def _extract_show_title(query):
+    cleaned = re.sub(r"(?i)\b(s\d{1,2}(?:e\d{1,3})?|season\s*\d+|episode\s*\d+|\d{1,2}x\d{1,3}|complete|pack|batch)\b", " ", query)
+    cleaned = re.sub(r"(?i)\b(2160p|1080p|720p|480p|4k|x264|x265|hevc|web-?dl|webrip|bluray|hdtv)\b", " ", cleaned)
+    cleaned = re.sub(r"\b(19\d{2}|20\d{2})\b", " ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
 def fetch_eztv(query, target_episode=None):
+    """Resolve show IMDb ID via TVMaze and query EZTV by imdb_id."""
+    show_title = _extract_show_title(query)
+    if not show_title or len(show_title) < 2:
+        return []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     try:
-        url = f"https://eztvx.to/api/get-torrents?limit=100&search={urllib.parse.quote(query)}"
+        tv_url = f"https://api.tvmaze.com/singlesearch/shows?q={urllib.parse.quote(show_title)}"
+        with urllib.request.urlopen(urllib.request.Request(tv_url, headers=headers), timeout=3) as tv_resp:
+            tv_data = json.loads(tv_resp.read().decode("utf-8"))
+        imdb_raw = (tv_data.get("externals") or {}).get("imdb") or ""
+        imdb_digits = re.sub(r"\D", "", str(imdb_raw))
+        if not imdb_digits:
+            return []
+
+        url = f"https://eztvx.to/api/get-torrents?imdb_id={imdb_digits}&limit=100"
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            torrents = data.get("torrents") or []
+            results = []
+            for item in torrents:
+                name = item.get("filename") or item.get("title") or "Unknown"
+                info_hash = (item.get("hash") or "").strip().lower()
+                if not info_hash:
+                    continue
+                score = calculate_match_score(name, query, target_episode)
+                if score > 0:
+                    results.append({
+                        "name": name,
+                        "info_hash": info_hash,
+                        "seeders": int(item.get("seeds", 0) or 0),
+                        "leechers": int(item.get("peers", 0) or 0),
+                        "size": int(item.get("size_bytes", 0) or 0),
+                        "score": score,
+                        "source": "EZTV",
+                    })
+            return results
+    except Exception:
+        pass
+    return []
+
+def fetch_torrents_csv(query, target_episode=None):
+    """Query TorrentsCSV public JSON index."""
+    try:
+        url = f"https://torrents-csv.com/service/search?q={urllib.parse.quote(query)}&size=100"
         req = urllib.request.Request(
             url,
             headers={
@@ -233,11 +398,10 @@ def fetch_eztv(query, target_episode=None):
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            torrents = data.get("torrents", [])
             results = []
-            for item in torrents:
-                name = item.get("filename") or item.get("title") or "Unknown"
-                info_hash = (item.get("hash") or "").lower()
+            for item in data.get("torrents") or []:
+                name = item.get("name") or "Unknown"
+                info_hash = (item.get("infohash") or "").strip().lower()
                 if not info_hash:
                     continue
                 score = calculate_match_score(name, query, target_episode)
@@ -245,23 +409,688 @@ def fetch_eztv(query, target_episode=None):
                     results.append({
                         "name": name,
                         "info_hash": info_hash,
-                        "seeders": int(item.get("seeds", 0)),
-                        "size": int(item.get("size_bytes", 0)),
+                        "seeders": int(item.get("seeders", 0) or 0),
+                        "leechers": int(item.get("leechers", 0) or 0),
+                        "size": int(item.get("size_bytes", 0) or 0),
                         "score": score,
+                        "source": "TorrentsCSV",
                     })
             return results
     except Exception:
         pass
     return []
 
-def search_torrents(query, target_episode=None):
-    all_results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        futures = [
-            executor.submit(fetch_apibay, query, target_episode),
-            executor.submit(fetch_solidtorrents, query, target_episode),
-            executor.submit(fetch_eztv, query, target_episode),
+def fetch_knaben(query, target_episode=None):
+    """Query Knaben open JSON meta-search API sorted by seeders."""
+    try:
+        payload = json.dumps({
+            "query": query,
+            "size": 100,
+            "order_by": "seeders",
+            "order_direction": "desc",
+            "hide_unsafe": True,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.knaben.org/v1",
+            data=payload,
+            headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results = []
+            for item in data.get("hits") or []:
+                name = item.get("title") or "Unknown"
+                info_hash = (item.get("hash") or "").strip().lower()
+                magnet = item.get("magnetUrl") or ""
+                if not info_hash and "btih:" in magnet.lower():
+                    m = re.search(r"btih:([a-fA-F0-9]{40})", magnet)
+                    if m:
+                        info_hash = m.group(1).lower()
+                if not info_hash:
+                    continue
+                score = calculate_match_score(name, query, target_episode)
+                if score > 0:
+                    results.append({
+                        "name": name,
+                        "info_hash": info_hash,
+                        "seeders": int(item.get("seeders", 0) or 0),
+                        "leechers": int(item.get("peers", 0) or 0),
+                        "size": int(item.get("bytes", 0) or 0),
+                        "score": score,
+                        "source": "Knaben",
+                    })
+            return results
+    except Exception:
+        pass
+    return []
+
+def parse_size_to_bytes(size_str):
+    """Convert human-readable size strings (e.g. '6.6 GiB') to integer bytes."""
+    if not size_str:
+        return 0
+    m = re.match(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?i?B)\s*$", str(size_str), re.IGNORECASE)
+    if not m:
+        return 0
+    val = float(m.group(1))
+    unit = m.group(2).lower()
+    multipliers = {
+        "b": 1,
+        "kb": 1000, "kib": 1024,
+        "mb": 1000**2, "mib": 1024**2,
+        "gb": 1000**3, "gib": 1024**3,
+        "tb": 1000**4, "tib": 1024**4,
+    }
+    return int(val * multipliers.get(unit, 1))
+
+def fetch_yts(query, target_episode=None):
+    """Query YTS movie API across official mirrors."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    encoded_q = urllib.parse.quote(query)
+    for domain in ("yts.lt", "yts.bz", "yts.am"):
+        try:
+            url = f"https://{domain}/api/v2/list_movies.json?query_term={encoded_q}&limit=50"
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                movies = data.get("data", {}).get("movies") or []
+                results = []
+                for movie in movies:
+                    base_title = movie.get("title_long") or movie.get("title") or "Unknown"
+                    for t in movie.get("torrents") or []:
+                        info_hash = (t.get("hash") or "").strip().lower()
+                        if not info_hash:
+                            continue
+                        parts = [
+                            base_title,
+                            t.get("quality") or "",
+                            t.get("type") or "",
+                            t.get("video_codec") or "",
+                            "YTS",
+                        ]
+                        name = " ".join(p for p in parts if p)
+                        score = calculate_match_score(name, query, target_episode)
+                        if score > 0:
+                            results.append({
+                                "name": name,
+                                "info_hash": info_hash,
+                                "seeders": int(t.get("seeds", 0) or 0),
+                                "leechers": int(t.get("peers", 0) or 0),
+                                "size": int(t.get("size_bytes", 0) or 0),
+                                "score": score,
+                                "source": "YTS",
+                            })
+                return results
+        except Exception:
+            continue
+    return []
+
+def fetch_nyaa(query, target_episode=None):
+    """Query Nyaa RSS feed across all categories."""
+    nyaa_ns = "{https://nyaa.si/xmlns/nyaa}"
+    try:
+        url = f"https://nyaa.si/?page=rss&q={urllib.parse.quote(query)}&c=0_0&f=0"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            root = ET.fromstring(resp.read())
+            results = []
+            for item in root.findall("./channel/item"):
+                name = item.findtext("title") or "Unknown"
+                info_hash = (item.findtext(f"{nyaa_ns}infoHash") or "").strip().lower()
+                if not info_hash:
+                    continue
+                score = calculate_match_score(name, query, target_episode)
+                if score > 0:
+                    results.append({
+                        "name": name,
+                        "info_hash": info_hash,
+                        "seeders": int(item.findtext(f"{nyaa_ns}seeders") or 0),
+                        "leechers": int(item.findtext(f"{nyaa_ns}leechers") or 0),
+                        "size": parse_size_to_bytes(item.findtext(f"{nyaa_ns}size")),
+                        "score": score,
+                        "source": "Nyaa",
+                    })
+            return results
+    except Exception:
+        pass
+    return []
+
+def _is_valid_hex_hash(h):
+    if not h or len(h) != 40:
+        return False
+    try:
+        bytes.fromhex(h)
+        return True
+    except ValueError:
+        return False
+
+def _clamp_count(val):
+    try:
+        v = int(val)
+    except (ValueError, TypeError):
+        return 0
+    return v if 0 <= v <= 10_000_000 else 0
+
+def is_archive_title(name):
+    return bool(re.search(r"(?i)(?:^|[\s.\-_\[])(rar|zip|7z|tar\.gz|iso)(?:$|[\s.\-_\]])", name or ""))
+
+def get_effective_seeders(item):
+    if item.get("scrape_verified") and item.get("live_seeders") is not None:
+        return int(item["live_seeders"])
+    return int(item.get("seeders", 0) or 0)
+
+def get_effective_leechers(item):
+    if item.get("scrape_verified") and item.get("live_leechers") is not None:
+        return int(item["live_leechers"])
+    return int(item.get("leechers", 0) or 0)
+
+def scrape_udp_tracker(tracker_url, info_hashes, timeout=1.5):
+    valid_hashes = [h.lower() for h in info_hashes if _is_valid_hex_hash(h)]
+    if not valid_hashes:
+        return False, {}
+    parsed = urllib.parse.urlparse(tracker_url)
+    host, port = parsed.hostname, parsed.port or 80
+    if not host:
+        return False, {}
+    try:
+        addr = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_DGRAM)[0][4]
+    except OSError:
+        return False, {}
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    try:
+        tx_connect = random.randint(1, 0x7FFFFFFF)
+        sock.sendto(struct.pack("!QII", UDP_PROTOCOL_ID, 0, tx_connect), addr)
+        data, _ = sock.recvfrom(64)
+        if len(data) < 16:
+            return False, {}
+        action, rx_tx, conn_id = struct.unpack("!IIQ", data[:16])
+        if action != 0 or rx_tx != tx_connect:
+            return False, {}
+        out = {}
+        responded = False
+        for i in range(0, len(valid_hashes), MAX_UDP_SCRAPE_BATCH):
+            chunk = valid_hashes[i:i + MAX_UDP_SCRAPE_BATCH]
+            tx_scrape = random.randint(1, 0x7FFFFFFF)
+            payload = struct.pack("!QII", conn_id, 2, tx_scrape) + b"".join(bytes.fromhex(h) for h in chunk)
+            sock.sendto(payload, addr)
+            sdata, _ = sock.recvfrom(4096)
+            if len(sdata) < 8:
+                continue
+            s_act, s_tx = struct.unpack("!II", sdata[:8])
+            if s_act != 2 or s_tx != tx_scrape:
+                continue
+            responded = True
+            body = sdata[8:]
+            for idx, h in enumerate(chunk):
+                off = idx * 12
+                if off + 12 <= len(body):
+                    s, _c, l = struct.unpack("!III", body[off:off + 12])
+                    out[h] = (_clamp_count(s), _clamp_count(l))
+        return responded, out
+    except OSError:
+        return False, {}
+    finally:
+        sock.close()
+
+def scrape_http_tracker(scrape_url, info_hashes, timeout=2.0):
+    valid_hashes = [h.lower() for h in info_hashes if _is_valid_hex_hash(h)]
+    if not valid_hashes:
+        return False, {}
+    out = {}
+    responded = False
+    for i in range(0, len(valid_hashes), 40):
+        chunk = valid_hashes[i:i + 40]
+        params = "&".join(f"info_hash={urllib.parse.quote_from_bytes(bytes.fromhex(h))}" for h in chunk)
+        req = urllib.request.Request(f"{scrape_url}?{params}", headers={"User-Agent": "watchtv/1.2"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read()
+            decoded, _ = _bdecode_next(raw, 0)
+            files_map = decoded.get(b"files", {}) if isinstance(decoded, dict) else {}
+            if isinstance(files_map, dict):
+                responded = True
+                for raw_h, stats in files_map.items():
+                    if isinstance(raw_h, bytes) and len(raw_h) == 20 and isinstance(stats, dict):
+                        out[raw_h.hex().lower()] = (
+                            _clamp_count(stats.get(b"complete", 0)),
+                            _clamp_count(stats.get(b"incomplete", 0)),
+                        )
+        except Exception:
+            continue
+    return responded, out
+
+def scrape_swarms(items, timeout=1.5):
+    hashes = list(dict.fromkeys(it["info_hash"].lower() for it in items if _is_valid_hex_hash(it.get("info_hash", ""))))
+    if not hashes:
+        return 0
+    nyaa_hashes = [
+        it["info_hash"].lower()
+        for it in items
+        if "Nyaa" in (it.get("source") or "") and _is_valid_hex_hash(it.get("info_hash", ""))
+    ]
+    best = {h: (0, 0) for h in hashes}
+    responded = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(LIVE_UDP_TRACKERS) + (1 if nyaa_hashes else 0)) as ex:
+        udp_futs = [ex.submit(scrape_udp_tracker, tr, hashes, timeout) for tr in LIVE_UDP_TRACKERS]
+        nyaa_fut = ex.submit(scrape_http_tracker, NYAA_SCRAPE_URL, nyaa_hashes, timeout + 0.5) if nyaa_hashes else None
+        for f in udp_futs:
+            try:
+                ok, mapping = f.result()
+            except Exception:
+                continue
+            if ok:
+                responded += 1
+                for h, (s, l) in mapping.items():
+                    ps, pl = best.get(h, (0, 0))
+                    best[h] = (max(ps, s), max(pl, l))
+        if nyaa_fut is not None:
+            try:
+                ok, mapping = nyaa_fut.result()
+                if ok:
+                    responded += 1
+                    for h, (s, l) in mapping.items():
+                        ps, pl = best.get(h, (0, 0))
+                        best[h] = (max(ps, s), max(pl, l))
+            except Exception:
+                pass
+    if responded == 0:
+        return 0
+    for it in items:
+        h = (it.get("info_hash") or "").lower()
+        if h in best:
+            it["live_seeders"], it["live_leechers"] = best[h]
+            it["scrape_verified"] = True
+    return responded
+
+def udp_announce_peers(tracker_url, info_hash, num_want=25, timeout=1.2):
+    if not _is_valid_hex_hash(info_hash):
+        return []
+    parsed = urllib.parse.urlparse(tracker_url)
+    host, port = parsed.hostname, parsed.port or 80
+    if not host:
+        return []
+    try:
+        addr = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_DGRAM)[0][4]
+    except OSError:
+        return []
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    try:
+        tx_connect = random.randint(1, 0x7FFFFFFF)
+        sock.sendto(struct.pack("!QII", UDP_PROTOCOL_ID, 0, tx_connect), addr)
+        data, _ = sock.recvfrom(64)
+        if len(data) < 16:
+            return []
+        action, rx_tx, conn_id = struct.unpack("!IIQ", data[:16])
+        if action != 0 or rx_tx != tx_connect:
+            return []
+        tx_ann = random.randint(1, 0x7FFFFFFF)
+        ih_bytes = bytes.fromhex(info_hash.lower())
+        peer_id = b"-WT0120-" + bytes(random.getrandbits(8) for _ in range(12))
+        req = struct.pack(
+            "!QII20s20sQQQIIIiH",
+            conn_id, 1, tx_ann, ih_bytes, peer_id,
+            0, 1, 0, 0, 0, random.randint(1, 0x7FFFFFFF), num_want, random.randint(49152, 65000),
+        )
+        sock.sendto(req, addr)
+        rdata, _ = sock.recvfrom(4096)
+        if len(rdata) < 20:
+            return []
+        a_act, a_tx, _iv, _l, _s = struct.unpack("!IIIII", rdata[:20])
+        if a_act != 1 or a_tx != tx_ann:
+            return []
+        peers = []
+        body = rdata[20:]
+        for off in range(0, len(body) - 5, 6):
+            ip = socket.inet_ntoa(body[off:off + 4])
+            pport = struct.unpack("!H", body[off + 4:off + 6])[0]
+            if pport > 0 and ip != "0.0.0.0":
+                peers.append((ip, pport))
+        return peers
+    except OSError:
+        return []
+    finally:
+        sock.close()
+
+async def _probe_peer_tcp(ip, port, ih_bytes, timeout=1.3):
+    writer = None
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=timeout)
+        reserved = bytes([0, 0, 0, 0, 0, 0x10, 0, 0x04])
+        peer_id = b"-WT0120-" + bytes(random.getrandbits(8) for _ in range(12))
+        writer.write(b"\x13BitTorrent protocol" + reserved + ih_bytes + peer_id)
+        await writer.drain()
+        resp = await asyncio.wait_for(reader.readexactly(68), timeout=timeout)
+        if resp[:20] != b"\x13BitTorrent protocol" or resp[28:48] != ih_bytes:
+            return None
+        supports_meta = bool(resp[25] & 0x10)
+        has_pieces = False
+        is_seed = False
+        try:
+            for _ in range(4):
+                hdr = await asyncio.wait_for(reader.readexactly(4), timeout=0.5)
+                mlen = struct.unpack("!I", hdr)[0]
+                if mlen == 0:
+                    continue
+                if mlen > 65536:
+                    break
+                msg = await asyncio.wait_for(reader.readexactly(mlen), timeout=0.5)
+                mid = msg[0]
+                if mid == 14:
+                    has_pieces = True
+                    is_seed = True
+                elif mid == 5:
+                    bf = msg[1:]
+                    if any(b != 0 for b in bf):
+                        has_pieces = True
+                        if all(b == 0xFF for b in bf[:-1]) and (bf[-1] in _VALID_FULL_LAST_BYTES):
+                            is_seed = True
+                elif mid == 4:
+                    has_pieces = True
+                elif mid == 20 and len(msg) > 2 and msg[1] == 0 and b"ut_metadata" in msg[2:]:
+                    supports_meta = True
+                if is_seed:
+                    break
+        except Exception:
+            pass
+        return {"supports_metadata": supports_meta, "has_pieces": has_pieces, "is_seed": is_seed}
+    except Exception:
+        return None
+    finally:
+        if writer is not None:
+            try:
+                writer.close()
+                await asyncio.wait_for(writer.wait_closed(), timeout=0.2)
+            except Exception:
+                pass
+
+async def _probe_single_torrent(info_hash, max_peers=32, timeout=1.8, peers_override=None):
+    if not _is_valid_hex_hash(info_hash):
+        return {"checked": False}
+    t0 = time.monotonic()
+    if peers_override is not None:
+        peers = list(dict.fromkeys(peers_override))[:max_peers]
+    else:
+        ann = await asyncio.gather(
+            *(asyncio.to_thread(udp_announce_peers, tr, info_hash, 30, 1.3) for tr in LIVE_UDP_TRACKERS[:4]),
+            return_exceptions=True,
+        )
+        per_tracker = [res for res in ann if isinstance(res, list) and res]
+        raw_peers = []
+        max_len = max((len(lst) for lst in per_tracker), default=0)
+        for idx in range(max_len):
+            for lst in per_tracker:
+                if idx < len(lst):
+                    raw_peers.append(lst[idx])
+        peers = list(dict.fromkeys(raw_peers))[:max_peers]
+    if not peers:
+        return {
+            "checked": True, "peers_found": 0, "handshakes_ok": 0,
+            "peers_with_pieces": 0, "full_seeds": 0, "supports_metadata": False,
+            "latency_ms": int((time.monotonic() - t0) * 1000),
+        }
+    ih_bytes = bytes.fromhex(info_hash.lower())
+    pending = {asyncio.create_task(_probe_peer_tcp(ip, port, ih_bytes, timeout=timeout)) for ip, port in peers}
+    handshakes_ok = 0
+    peers_with_pieces = 0
+    full_seeds = 0
+    supports_meta = False
+    try:
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for t in done:
+                try:
+                    info = t.result()
+                except Exception:
+                    continue
+                if info is None:
+                    continue
+                handshakes_ok += 1
+                if info["has_pieces"]:
+                    peers_with_pieces += 1
+                if info["is_seed"]:
+                    full_seeds += 1
+                if info["supports_metadata"]:
+                    supports_meta = True
+            if full_seeds >= 1 or peers_with_pieces >= 2 or handshakes_ok >= 3:
+                break
+    finally:
+        for t in pending:
+            t.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+    return {
+        "checked": True,
+        "peers_found": len(peers),
+        "handshakes_ok": handshakes_ok,
+        "peers_with_pieces": peers_with_pieces,
+        "full_seeds": full_seeds,
+        "supports_metadata": supports_meta,
+        "latency_ms": int((time.monotonic() - t0) * 1000),
+    }
+
+def probe_items(items, force=False):
+    targets = [it for it in items if _is_valid_hex_hash(it.get("info_hash", "")) and (force or not (it.get("probe") or {}).get("checked"))]
+    if not targets:
+        return
+    async def _run():
+        res_list = await asyncio.gather(
+            *(_probe_single_torrent(it["info_hash"]) for it in targets),
+            return_exceptions=True,
+        )
+        for it, pr in zip(targets, res_list):
+            if isinstance(pr, dict):
+                it["probe"] = pr
+    asyncio.run(_run())
+
+def classify_health(item):
+    if item.get("session_failed"):
+        return "FAIL", "\033[1;41;97m✕ FAIL \033[0m"
+    if is_archive_title(item.get("name", "")):
+        return "ARCHIVE", "\033[1;31m✕ ARCH \033[0m"
+    seeds = get_effective_seeders(item)
+    leechers = get_effective_leechers(item)
+    probe = item.get("probe")
+    if probe and probe.get("checked"):
+        if probe.get("full_seeds", 0) > 0 or probe.get("peers_with_pieces", 0) > 0:
+            return "READY", "\033[1;32m✓ READY\033[0m"
+        if probe.get("handshakes_ok", 0) > 0 and seeds > 0:
+            return "READY", "\033[1;32m✓ READY\033[0m"
+        if seeds == 0:
+            return "DEAD", "\033[0;90m✕ DEAD \033[0m"
+        if seeds >= 20:
+            return "HIGH", "\033[0;32m● HIGH \033[0m"
+        return "RISKY", "\033[1;31m○ RISKY\033[0m"
+    if not item.get("scrape_verified"):
+        return "UNVERIFIED", "\033[0;90m? UNVER\033[0m"
+    if seeds == 0:
+        return "DEAD", "\033[0;90m✕ DEAD \033[0m"
+    if seeds >= 15:
+        return "HIGH", "\033[0;32m● HIGH \033[0m"
+    if seeds >= 3:
+        if seeds < 5 and leechers > seeds * 10:
+            return "RISKY", "\033[1;31m○ RISKY\033[0m"
+        return "FAIR", "\033[1;33m◐ FAIR \033[0m"
+    return "RISKY", "\033[1;31m○ RISKY\033[0m"
+
+def calculate_rank_score(item):
+    seeds = get_effective_seeders(item)
+    leechers = get_effective_leechers(item)
+    base = float(item.get("score", 10.0)) + min(seeds, 300) * 1.5 + min(leechers, 100) * 0.1
+    size = int(item.get("size", 0) or 0)
+    if 0 < size < 15 * 1024 * 1024:
+        base *= 0.1
+    if is_archive_title(item.get("name", "")):
+        base *= 0.1
+    if item.get("session_failed"):
+        base *= 0.001
+    elif seeds == 0:
+        base *= 0.01
+        if leechers > 0:
+            base *= 0.5
+    elif seeds == 1:
+        base *= 0.15
+    elif seeds == 2:
+        base *= 0.45
+    elif seeds < 10:
+        base *= 0.80
+    probe = item.get("probe")
+    if probe and probe.get("checked"):
+        if probe.get("full_seeds", 0) > 0 or probe.get("peers_with_pieces", 0) > 0:
+            base *= 1.25
+        elif probe.get("handshakes_ok", 0) > 0 and seeds > 0:
+            base *= 1.10
+        elif seeds >= 20:
+            base *= 0.90
+        else:
+            base *= 0.35
+    return base
+
+def normalize_info_hash(raw_hash):
+    h = (raw_hash or "").strip()
+    if len(h) == 40:
+        try:
+            bytes.fromhex(h)
+            return h.lower()
+        except ValueError:
+            return h.lower()
+    if len(h) == 32:
+        try:
+            return base64.b32decode(h.upper()).hex().lower()
+        except Exception:
+            return h.lower()
+    return h.lower()
+
+def extract_hash_from_magnet(magnet):
+    if not magnet or "btih:" not in magnet.lower():
+        return ""
+    m = re.search(r"btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})", magnet, re.IGNORECASE)
+    return normalize_info_hash(m.group(1)) if m else ""
+
+def load_prowlarr_config():
+    env_url = (os.environ.get("WATCHTV_PROWLARR_URL") or "").strip().rstrip("/")
+    env_key = (os.environ.get("WATCHTV_PROWLARR_KEY") or "").strip()
+    if env_url and env_key:
+        return env_url, env_key
+    cfg_path = Path.home() / ".config" / "watchtv" / "config.json"
+    if cfg_path.is_file():
+        try:
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            url = env_url or str(data.get("prowlarr_url") or "").strip().rstrip("/")
+            key = env_key or str(data.get("prowlarr_api_key") or "").strip()
+            if url and key:
+                return url, key
+        except Exception:
+            pass
+    return None, None
+
+def _fetch_prowlarr_one_indexer(base_url, api_key, idx_id, idx_name, query, target_episode=None, timeout=4.5):
+    url = f"{base_url}/api/v1/search?query={urllib.parse.quote(query)}&type=search&indexerIds={idx_id}"
+    req = urllib.request.Request(url, headers={"X-Api-Key": api_key, "User-Agent": "watchtv/1.2"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(data, list):
+            return []
+        src = f"P:{idx_name[:8]}" if idx_name else "Prowlarr"
+        results = []
+        for item in data:
+            if item.get("protocol") and item.get("protocol") != "torrent":
+                continue
+            name = item.get("title") or "Unknown"
+            magnet = (item.get("magnetUrl") or "").strip()
+            download_url = (item.get("downloadUrl") or "").strip()
+            info_hash = normalize_info_hash(item.get("infoHash") or "")
+            if not info_hash and magnet:
+                info_hash = extract_hash_from_magnet(magnet)
+            if not info_hash and not download_url:
+                continue
+            score = calculate_match_score(name, query, target_episode)
+            if score > 0:
+                results.append({
+                    "name": name,
+                    "info_hash": info_hash,
+                    "magnet": magnet,
+                    "download_url": download_url,
+                    "seeders": int(item.get("seeders", 0) or 0),
+                    "leechers": int(item.get("leechers", 0) or 0),
+                    "size": int(item.get("size", 0) or 0),
+                    "score": score,
+                    "source": src,
+                })
+        return results
+    except Exception:
+        return []
+
+def fetch_prowlarr(query, target_episode=None):
+    """Query all enabled torrent indexers in Prowlarr in parallel per indexerId."""
+    base_url, api_key = load_prowlarr_config()
+    if not base_url or not api_key:
+        return []
+    try:
+        req = urllib.request.Request(
+            f"{base_url}/api/v1/indexer",
+            headers={"X-Api-Key": api_key, "User-Agent": "watchtv/1.2"},
+        )
+        with urllib.request.urlopen(req, timeout=2.5) as resp:
+            raw_indexers = json.loads(resp.read().decode("utf-8"))
+        indexers = [
+            x for x in (raw_indexers or [])
+            if x.get("enable") and x.get("id") is not None
+            and (not x.get("protocol") or x.get("protocol") == "torrent")
         ]
+        if not indexers:
+            return []
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(indexers), 16)) as ex:
+            futs = [
+                ex.submit(
+                    _fetch_prowlarr_one_indexer,
+                    base_url, api_key, int(x["id"]), str(x.get("name") or ""), query, target_episode,
+                )
+                for x in indexers
+            ]
+            for f in concurrent.futures.as_completed(futs):
+                try:
+                    res = f.result()
+                    if res:
+                        results.extend(res)
+                except Exception:
+                    pass
+        return results
+    except Exception:
+        return []
+
+def _query_all_providers(q, target_episode=None, use_prowlarr=True, prowlarr_only=False):
+    all_results = []
+    tasks = []
+    if not prowlarr_only:
+        tasks.extend([
+            (fetch_apibay, q, target_episode),
+            (fetch_solidtorrents, q, target_episode),
+            (fetch_torrents_csv, q, target_episode),
+            (fetch_yts, q, target_episode),
+            (fetch_nyaa, q, target_episode),
+            (fetch_eztv, q, target_episode),
+            (fetch_knaben, q, target_episode),
+        ])
+    if use_prowlarr or prowlarr_only:
+        tasks.append((fetch_prowlarr, q, target_episode))
+    if not tasks:
+        return all_results
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(tasks)) as executor:
+        futures = [executor.submit(fn, q_arg, ep_arg) for fn, q_arg, ep_arg in tasks]
         for f in concurrent.futures.as_completed(futures):
             try:
                 res = f.result()
@@ -269,25 +1098,693 @@ def search_torrents(query, target_episode=None):
                     all_results.extend(res)
             except Exception:
                 pass
+    return all_results
 
-    seen = set()
-    deduped = []
+def search_torrents(query, target_episode=None, min_seeds=2, probe_top=5, no_probe=False, use_prowlarr=True, prowlarr_only=False):
+    variants = generate_search_variants(query)
+    all_results = _query_all_providers(
+        variants[0], target_episode, use_prowlarr=use_prowlarr, prowlarr_only=prowlarr_only,
+    )
+    if len(all_results) < 3 and len(variants) > 1:
+        for alt_q in variants[1:]:
+            all_results.extend(
+                _query_all_providers(alt_q, target_episode, use_prowlarr=use_prowlarr, prowlarr_only=prowlarr_only)
+            )
+
+    merged = {}
     for item in all_results:
-        h = item.get("info_hash")
-        if h and h not in seen:
-            seen.add(h)
-            deduped.append(item)
+        h = normalize_info_hash(item.get("info_hash") or "")
+        dl = (item.get("download_url") or "").strip()
+        if h:
+            key = h
+        elif dl:
+            key = f"dl:{hashlib.sha1(dl.encode('utf-8')).hexdigest()}"
+        else:
+            continue
+        item["info_hash"] = h
+        item["download_url"] = dl
+        item["seeders"] = _clamp_count(item.get("seeders", 0))
+        item["leechers"] = _clamp_count(item.get("leechers", 0))
+        if key not in merged:
+            merged[key] = item
+        else:
+            existing = merged[key]
+            if item["seeders"] > existing["seeders"]:
+                existing["seeders"] = item["seeders"]
+            existing["leechers"] = max(existing.get("leechers", 0), item["leechers"])
+            if item.get("score", 0) > existing.get("score", 0):
+                existing["score"] = item["score"]
+            if not existing.get("magnet") and item.get("magnet"):
+                existing["magnet"] = item["magnet"]
+            if not existing.get("download_url") and dl:
+                existing["download_url"] = dl
+            src = item.get("source") or ""
+            if src and src not in (existing.get("source") or ""):
+                existing["source"] = f"{existing.get('source', '')},{src}".strip(",")
 
-    # Rank by relevance score multiplied by bonus weight, then seed count
-    deduped.sort(key=lambda x: (x.get("score", 0) * 1000 + x.get("seeders", 0)), reverse=True)
-    return deduped
+    deduped = list(merged.values())
+    if not deduped:
+        return [], [], False
+
+    sys.stdout.write(f"\r\033[1;34m⏳ Verifying live swarm health ({len(deduped)} candidates)...\033[0m")
+    sys.stdout.flush()
+    scrape_swarms(deduped)
+    print("\r\033[K", end="")
+
+    deduped.sort(key=calculate_rank_score, reverse=True)
+    visible = [it for it in deduped if get_effective_seeders(it) >= min_seeds]
+    used_fallback = False
+    if not visible and deduped:
+        used_fallback = True
+        nonzero = [it for it in deduped if get_effective_seeders(it) >= 1]
+        visible = nonzero if nonzero else list(deduped)
+
+    if not no_probe and probe_top > 0 and visible:
+        to_probe = visible[:probe_top]
+        sys.stdout.write(f"\r\033[1;34m⏳ Probing peer reachability for top {len(to_probe)} results...\033[0m")
+        sys.stdout.flush()
+        probe_items(to_probe)
+        print("\r\033[K", end="")
+        visible.sort(key=calculate_rank_score, reverse=True)
+        deduped.sort(key=calculate_rank_score, reverse=True)
+
+    return visible, deduped, used_fallback
+
+def build_magnet(info_hash, name, with_trackers=False):
+    magnet = f"magnet:?xt=urn:btih:{info_hash}&dn={urllib.parse.quote(name)}"
+    if with_trackers:
+        magnet += "".join(f"&tr={urllib.parse.quote(t)}" for t in PUBLIC_TRACKERS)
+    return magnet
+
+def _bdecode_next(data, idx):
+    ch = data[idx:idx + 1]
+    if ch == b"i":
+        end = data.index(b"e", idx + 1)
+        return int(data[idx + 1:end]), end + 1
+    if ch == b"l":
+        items = []
+        idx += 1
+        while data[idx:idx + 1] != b"e":
+            val, idx = _bdecode_next(data, idx)
+            items.append(val)
+        return items, idx + 1
+    if ch == b"d":
+        mapping = {}
+        idx += 1
+        while data[idx:idx + 1] != b"e":
+            key, idx = _bdecode_next(data, idx)
+            val, idx = _bdecode_next(data, idx)
+            mapping[key] = val
+        return mapping, idx + 1
+    colon = data.index(b":", idx)
+    length = int(data[idx:colon])
+    start = colon + 1
+    end = start + length
+    return data[start:end], end
+
+def classify_file(path_str):
+    lower = path_str.lower()
+    ext = Path(lower).suffix
+    label = ext.lstrip(".").upper() if ext else "FILE"
+    if ext in VIDEO_EXTS:
+        return "video", f"[{label}]"
+    if ext in SUB_EXTS:
+        return "sub", f"[{label}]"
+    if ext in IMAGE_EXTS:
+        return "image", f"[{label}]"
+    if ext in ARCHIVE_EXTS or re.search(r"\.r\d{2}$", lower):
+        return "archive", f"[{label}]"
+    return "other", f"[{label}]"
+
+def format_type_badge(category, badge):
+    if category == "video":
+        return f"\033[1;36m{badge:<6}\033[0m"
+    if category == "image":
+        return f"\033[1;32m{badge:<6}\033[0m"
+    if category == "archive":
+        return f"\033[1;31m{badge:<6}\033[0m"
+    if category == "sub":
+        return f"\033[1;33m{badge:<6}\033[0m"
+    return f"\033[0;90m{badge:<6}\033[0m"
+
+def extract_torrent_files(torrent_path):
+    raw = Path(torrent_path).read_bytes()
+    decoded, _ = _bdecode_next(raw, 0)
+    info = decoded.get(b"info", {})
+    files = []
+    if b"files" in info:
+        for idx, entry in enumerate(info[b"files"]):
+            parts = [p.decode("utf-8", errors="replace") for p in entry.get(b"path", [])]
+            rel_path = "/".join(parts) if parts else f"file_{idx}"
+            size = int(entry.get(b"length", 0))
+            cat, badge = classify_file(rel_path)
+            files.append({
+                "index": idx,
+                "path": rel_path,
+                "name": parts[-1] if parts else rel_path,
+                "size": size,
+                "category": cat,
+                "badge": badge,
+            })
+    else:
+        name = info.get(b"name", b"video").decode("utf-8", errors="replace")
+        size = int(info.get(b"length", 0))
+        cat, badge = classify_file(name)
+        files.append({
+            "index": 0,
+            "path": name,
+            "name": name,
+            "size": size,
+            "category": cat,
+            "badge": badge,
+        })
+    return files
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+def resolve_download_url(download_url, meta_dir, timeout=8.0):
+    """Resolve a Prowlarr proxy downloadUrl (301 magnet redirect or 200 raw .torrent)."""
+    if not download_url:
+        return None, None, None
+    opener = urllib.request.build_opener(_NoRedirectHandler)
+    current_url = download_url
+    for _ in range(3):
+        req = urllib.request.Request(current_url, headers={"User-Agent": "watchtv/1.2"})
+        try:
+            with opener.open(req, timeout=timeout) as resp:
+                raw = resp.read()
+                if raw.startswith(b"d"):
+                    meta_path = Path(meta_dir)
+                    meta_path.mkdir(parents=True, exist_ok=True)
+                    digest = hashlib.sha1(raw).hexdigest()
+                    tpath = meta_path / f"{digest}.torrent"
+                    tpath.write_bytes(raw)
+                    try:
+                        files = extract_torrent_files(tpath)
+                        return None, tpath, files
+                    except Exception:
+                        tpath.unlink(missing_ok=True)
+                        return None, None, None
+                return None, None, None
+        except urllib.error.HTTPError as exc:
+            if exc.code in (301, 302, 303, 307, 308):
+                loc = (exc.headers.get("Location") or "").strip()
+                if loc.lower().startswith("magnet:"):
+                    return loc, None, None
+                if loc.lower().startswith(("http://", "https://")):
+                    current_url = loc
+                    continue
+            return None, None, None
+        except Exception:
+            return None, None, None
+    return None, None, None
+
+def fetch_torrent_metadata(info_hash, name, meta_dir, timeout=18, no_peer_timeout=10, download_url="", selected_item=None):
+    """Fetch .torrent metadata only (zero media bytes) via webtorrent downloadmeta or Prowlarr downloadUrl."""
+    info_hash = normalize_info_hash(info_hash or "")
+    resolved_magnet = None
+    if download_url and not info_hash:
+        short_name = name[:55] + ("..." if len(name) > 55 else "")
+        sys.stdout.write(f"\r\033[1;34m⏳ Resolving Prowlarr link for \"{short_name}\"...\033[0m\033[K")
+        sys.stdout.flush()
+        resolved_magnet, direct_path, direct_files = resolve_download_url(download_url, meta_dir)
+        print("\r\033[K", end="")
+        if direct_path is not None and direct_files is not None:
+            return direct_path, direct_files
+        if resolved_magnet:
+            info_hash = extract_hash_from_magnet(resolved_magnet)
+            if selected_item is not None:
+                selected_item["info_hash"] = info_hash
+                selected_item["magnet"] = resolved_magnet
+        else:
+            print("\033[1;33m⚠ Could not resolve Prowlarr download link. Pick another result.\033[0m")
+            return None, None
+
+    if not info_hash:
+        print("\033[1;33m⚠ Missing infohash for this torrent. Pick another result.\033[0m")
+        return None, None
+
+    torrent_path = Path(meta_dir) / f"{info_hash.lower()}.torrent"
+    if torrent_path.exists() and torrent_path.stat().st_size > 0:
+        try:
+            files = extract_torrent_files(torrent_path)
+            return torrent_path, files
+        except Exception:
+            torrent_path.unlink(missing_ok=True)
+
+    magnet = build_magnet(info_hash, name, with_trackers=True)
+    short_name = name[:55] + ("..." if len(name) > 55 else "")
+    try:
+        proc = subprocess.Popen(
+            ["webtorrent", "downloadmeta", magnet, "-o", str(meta_dir)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        print("\n\033[1;31mError: 'webtorrent' CLI not found in PATH.\033[0m")
+        return None, None
+
+    peer_state = {"peers": 0, "saw_peers": False}
+
+    def _read_peers():
+        if proc.stdout is None:
+            return
+        try:
+            for raw_line in iter(proc.stdout.readline, b""):
+                text = _ANSI_RE.sub("", raw_line.decode("utf-8", errors="ignore"))
+                m = _PEER_COUNT_RE.search(text)
+                if m:
+                    count = int(m.group(1))
+                    peer_state["peers"] = count
+                    if count > 0:
+                        peer_state["saw_peers"] = True
+        except Exception:
+            pass
+
+    threading.Thread(target=_read_peers, daemon=True).start()
+
+    start = time.monotonic()
+    try:
+        while True:
+            elapsed = time.monotonic() - start
+            peers = peer_state["peers"]
+            peer_label = f"{peers} peer{'s' if peers != 1 else ''}"
+            sys.stdout.write(
+                f"\r\033[1;34m⏳ Inspecting metadata for \"{short_name}\" "
+                f"({int(elapsed)}s/{timeout}s • {peer_label}, Ctrl+C to cancel)...\033[0m\033[K"
+            )
+            sys.stdout.flush()
+
+            if torrent_path.exists() and torrent_path.stat().st_size > 0:
+                try:
+                    files = extract_torrent_files(torrent_path)
+                    try:
+                        proc.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        proc.terminate()
+                    print("\r\033[K", end="")
+                    return torrent_path, files
+                except Exception:
+                    pass
+
+            if proc.poll() is not None:
+                break
+            if not peer_state["saw_peers"] and elapsed >= no_peer_timeout:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1.5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                print("\r\033[K", end="")
+                print(f"\033[1;33m⚠ Metadata fetch timed out after {no_peer_timeout}s (0 peers connected). Marked failed — pick another result.\033[0m")
+                torrent_path.unlink(missing_ok=True)
+                return None, None
+            if elapsed >= timeout:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1.5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                print("\r\033[K", end="")
+                print("\033[1;33m⚠ Metadata fetch timed out (peers did not send metadata). Marked failed — pick another result.\033[0m")
+                torrent_path.unlink(missing_ok=True)
+                return None, None
+
+            time.sleep(0.25)
+    except KeyboardInterrupt:
+        proc.terminate()
+        try:
+            proc.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        print("\r\033[K", end="")
+        print("\033[1;33mCancelled metadata inspection.\033[0m")
+        torrent_path.unlink(missing_ok=True)
+        return None, None
+    finally:
+        if proc.stdout is not None:
+            try:
+                proc.stdout.close()
+            except Exception:
+                pass
+
+    print("\r\033[K", end="")
+    print("\033[1;33m⚠ Could not retrieve torrent metadata from peers. Pick another result.\033[0m")
+    torrent_path.unlink(missing_ok=True)
+    return None, None
+
+def match_episode_file(video_files, target_episode):
+    """Match an episode number against actual video filenames in a pack."""
+    ep_raw = str(target_episode).strip().lstrip("eE")
+    try:
+        ep_num = int(ep_raw)
+        patterns = [
+            rf"s\d{{1,2}}\s*e0*{ep_num}\b",
+            rf"\be0*{ep_num}\b",
+            rf"\bepisode\s*0*{ep_num}\b",
+            rf"(?:^|[\s._\-\[])0*{ep_num}(?:[\s._\-\]\.]|$)",
+        ]
+    except ValueError:
+        patterns = [re.escape(ep_raw.lower())]
+
+    for pat in patterns:
+        for vf in video_files:
+            # Strip common codec/resolution numbers before loose fallback check
+            cleaned = re.sub(r"(?i)\b(480p|720p|1080p|2160p|4k|x264|x265|h264|h265|10bit)\b", "", vf["name"].lower())
+            if re.search(pat, cleaned):
+                return vf
+    return None
+
+def launch_stream(source, name, save_dir=None, use_peerflix=False, playlist=False, select_index=None):
+    cmd = ["stream-torrent", str(source)]
+    if save_dir:
+        cmd += ["-o", save_dir]
+    if use_peerflix:
+        cmd += ["--peerflix"]
+    if playlist:
+        cmd += ["--playlist"]
+    elif select_index is not None:
+        cmd += ["-s", str(select_index)]
+
+    print(f"\n\033[1;32m▶ Streaming:\033[0m {name}\n")
+    start_ts = time.monotonic()
+    try:
+        res = subprocess.run(cmd)
+        elapsed = time.monotonic() - start_ts
+        if res.returncode != 0:
+            print(f"\033[1;33m⚠ Stream exited with code {res.returncode} after {elapsed:.1f}s (swarm may have stalled or peers were unreachable).\033[0m")
+        return res.returncode
+    except KeyboardInterrupt:
+        return 0
+
+def find_downloaded_file(base_dir, rel_path, filename):
+    base = Path(base_dir)
+    direct = base / rel_path
+    if direct.is_file():
+        return direct
+    for match in base.rglob("*"):
+        if match.is_file() and match.name == filename:
+            return match
+    lower_name = filename.lower()
+    for match in base.rglob("*"):
+        if match.is_file() and match.name.lower() == lower_name:
+            return match
+    return None
+
+def launch_image(torrent_path, item, save_dir=None, multi_file=False):
+    viewer = shutil.which("imv") or shutil.which("xdg-open")
+    if not viewer:
+        print("\033[1;31mError: neither 'imv' nor 'xdg-open' found in PATH.\033[0m")
+        return
+
+    def _download_and_open(target_dir):
+        cmd = ["webtorrent", "download", str(torrent_path), "-o", str(target_dir)]
+        for tr in PUBLIC_TRACKERS:
+            cmd += ["-a", tr]
+        if multi_file:
+            cmd += ["--select", str(item["index"])]
+
+        print(f"\n\033[1;32m🖼 Downloading image:\033[0m {item['name']}\n")
+        try:
+            res = subprocess.run(cmd)
+        except FileNotFoundError:
+            print("\033[1;31mError: 'webtorrent' CLI not found in PATH.\033[0m")
+            return
+        except KeyboardInterrupt:
+            return
+
+        if res.returncode != 0:
+            print("\033[1;31m⚠ Image download failed or was cancelled.\033[0m")
+            return
+
+        img_path = find_downloaded_file(target_dir, item["path"], item["name"])
+        if not img_path:
+            print(f"\033[1;31m⚠ Downloaded image not found in {target_dir}.\033[0m")
+            return
+
+        print(f"\033[1;32m▶ Opening in {Path(viewer).name}:\033[0m {img_path}\n")
+        try:
+            subprocess.run([viewer, str(img_path)])
+        except KeyboardInterrupt:
+            pass
+
+    if save_dir:
+        out_path = Path(save_dir).expanduser()
+        out_path.mkdir(parents=True, exist_ok=True)
+        _download_and_open(out_path)
+    else:
+        with tempfile.TemporaryDirectory(prefix="watchtv-img-") as tmp_dir:
+            _download_and_open(Path(tmp_dir))
+
+def _matches_pack_filter(path_str, filter_terms):
+    if not filter_terms:
+        return True
+    lower = path_str.lower()
+    return all(term in lower for term in filter_terms)
+
+def print_pack_files(files, show_non_video=False, filter_query=None):
+    videos = [f for f in files if f["category"] == "video"]
+    images = [f for f in files if f["category"] == "image"]
+    selectable = videos + images
+    archives = [f for f in files if f["category"] == "archive"]
+    subs = [f for f in files if f["category"] == "sub"]
+    others = [f for f in files if f["category"] == "other"]
+    total_size = sum(f["size"] for f in files)
+
+    filter_terms = filter_query.lower().split() if filter_query else []
+    indexed_selectable = [
+        (idx, sf) for idx, sf in enumerate(selectable)
+        if _matches_pack_filter(sf["path"], filter_terms)
+    ]
+    filtered_non_video = [
+        nf for nf in archives + subs + others
+        if _matches_pack_filter(nf["path"], filter_terms)
+    ]
+
+    ext_summary = ", ".join(sorted({f["badge"].strip("[]") for f in videos})) or "none"
+    summary_parts = [f"\033[1;36m{len(videos)} video(s)\033[0m ({ext_summary})"]
+    if images:
+        img_summary = ", ".join(sorted({f["badge"].strip("[]") for f in images}))
+        summary_parts.append(f"\033[1;32m{len(images)} image(s)\033[0m ({img_summary})")
+    if subs:
+        summary_parts.append(f"\033[1;33m{len(subs)} sub(s)\033[0m")
+    if archives:
+        summary_parts.append(f"\033[1;31m{len(archives)} archive(s)\033[0m")
+    if others:
+        summary_parts.append(f"{len(others)} other")
+
+    filter_note = f"  |  Filter: \033[1;33m/{filter_query}\033[0m ({len(indexed_selectable)} match)" if filter_terms else ""
+    term_width = shutil.get_terminal_size((100, 24)).columns
+    line = "─" * min(term_width - 2, 110)
+    print(f"\n \033[1;35m📦 Pack Contents:\033[0m {'  |  '.join(summary_parts)}  |  Total: \033[1;37m{format_size(total_size)}\033[0m{filter_note}")
+    print(f" {line}")
+    print(f" {'#':<3}  {'TYPE':<6}  {'SIZE':>9}   {'FILE'}")
+    print(f" {line}")
+
+    for idx, sf in indexed_selectable:
+        badge = format_type_badge(sf["category"], sf["badge"])
+        print(f" \033[1;37m{idx:<3}\033[0m  {badge}  {format_size(sf['size']):>9}   {highlight_name(sf['path'], show_pack_tag=False)}")
+
+    if show_non_video or not selectable:
+        for nf in filtered_non_video:
+            badge = format_type_badge(nf["category"], nf["badge"])
+            print(f" {'-':<3}  {badge}  {format_size(nf['size']):>9}   {nf['path']}")
+
+    if filter_terms and not indexed_selectable and not (show_non_video and filtered_non_video):
+        print(f" \033[1;33mNo files match '/{filter_query}'. Enter '/' to clear filter.\033[0m")
+
+    print(f" {line}")
+
+def browse_torrent_pack(selected, torrent_path, files, save_dir, use_peerflix, target_episode, row_playlist):
+    """Inspect pack contents and let user stream, navigate episodes, or go back without opening mpv."""
+    name = selected.get("name", "video")
+    ih = selected.get("info_hash") or ""
+    magnet = selected.get("magnet") or (build_magnet(ih, name, with_trackers=False) if ih else str(torrent_path))
+    stream_source = magnet if use_peerflix else str(torrent_path)
+
+    videos = [f for f in files if f["category"] == "video"]
+    images = [f for f in files if f["category"] == "image"]
+    selectable = videos + images
+    archives = [f for f in files if f["category"] == "archive"]
+
+    if not selectable:
+        print_pack_files(files, show_non_video=True)
+        if archives:
+            print("\033[1;31m⚠ Archive-only release (.zip/.rar/.iso) — cannot stream directly in mpv. Pick another result.\033[0m")
+        else:
+            print("\033[1;31m⚠ No playable video or image files found in this torrent. Pick another result.\033[0m")
+        return "back"
+
+    if row_playlist:
+        if not videos:
+            print("\033[1;33m⚠ No video files for playlist mode; showing selectable files instead.\033[0m")
+        else:
+            if archives:
+                print("\033[1;33m⚠ Note: this pack also contains archive files alongside videos.\033[0m")
+            launch_stream(stream_source, name, save_dir=save_dir, use_peerflix=use_peerflix, playlist=True)
+            return "back"
+
+    if target_episode and videos:
+        matched = match_episode_file(videos, target_episode)
+        if matched:
+            print(f"\033[1;32m✓ Matched Episode {target_episode}:\033[0m {format_type_badge(matched['category'], matched['badge'])} {matched['path']} ({format_size(matched['size'])})")
+            launch_stream(stream_source, matched["name"], save_dir=save_dir, use_peerflix=use_peerflix, select_index=matched["index"])
+            return "back"
+        print(f"\033[1;33m⚠ Could not auto-match Episode {target_episode} in filenames. Choose from the list below:\033[0m")
+
+    if len(selectable) == 1:
+        sf = selectable[0]
+        is_image = sf["category"] == "image"
+        extra = len(files) - 1
+        extra_note = f" (+{extra} bundled sub/other file{'s' if extra != 1 else ''})" if extra else ""
+        icon = "🖼" if is_image else "🎬"
+        action_label = "Open in imv" if is_image else "Play in mpv"
+        print(f"\n \033[1;32m{icon} Ready:\033[0m {format_type_badge(sf['category'], sf['badge'])} {highlight_name(sf['path'], show_pack_tag=False)}  ({format_size(sf['size'])}){extra_note}")
+        if archives:
+            print("\033[1;33m ⚠ Pack also contains archive files; only the selected file will open.\033[0m")
+        while True:
+            try:
+                ans = input(f"\n\033[1;36m[Enter] {action_label}  |  [a] Show all files  |  [b] Back to results  |  [q] Quit:\033[0m ").strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                return "quit"
+            if ans in ["", "y", "yes", "0"]:
+                if is_image:
+                    launch_image(torrent_path, sf, save_dir=save_dir, multi_file=len(files) > 1)
+                else:
+                    launch_stream(stream_source, sf["name"], save_dir=save_dir, use_peerflix=use_peerflix, select_index=sf["index"])
+                return "back"
+            if ans == "a":
+                print_pack_files(files, show_non_video=True)
+            elif ans in ["b", "back"]:
+                return "back"
+            elif ans in ["q", "quit", "exit"]:
+                return "quit"
+            else:
+                print("\033[1;31mInvalid option. Press Enter to open, 'a' to inspect files, 'b' for back, or 'q' to quit.\033[0m")
+
+    show_all = False
+    filter_query = None
+    print_pack_files(files, show_non_video=show_all, filter_query=filter_query)
+    while True:
+        try:
+            playlist_hint = "  |  [p] Playlist all" if videos else ""
+            filter_hint = "  |  [/query] Filter  |  [/] Clear" if filter_query else "  |  [/query] Filter"
+            ans = input(f"\n\033[1;36mPick file # (0-{len(selectable)-1}){playlist_hint}{filter_hint}  |  [a] Toggle other files  |  [b] Back  |  [q] Quit:\033[0m ").strip()
+        except (KeyboardInterrupt, EOFError):
+            return "quit"
+
+        low = ans.lower()
+        if low in ["b", "back"]:
+            return "back"
+        if low in ["q", "quit", "exit"]:
+            return "quit"
+        if ans.startswith("/"):
+            filter_query = ans[1:].strip() or None
+            print_pack_files(files, show_non_video=show_all, filter_query=filter_query)
+            continue
+        if low == "a":
+            show_all = not show_all
+            print_pack_files(files, show_non_video=show_all, filter_query=filter_query)
+            continue
+        if low in ["p", "playlist", "all"]:
+            if not videos:
+                print("\033[1;33m⚠ Playlist mode requires video files.\033[0m")
+                continue
+            launch_stream(stream_source, name, save_dir=save_dir, use_peerflix=use_peerflix, playlist=True)
+            continue
+        if ans.isdigit() and 0 <= int(ans) < len(selectable):
+            sf = selectable[int(ans)]
+            if sf["category"] == "image":
+                launch_image(torrent_path, sf, save_dir=save_dir, multi_file=len(files) > 1)
+            else:
+                launch_stream(stream_source, sf["name"], save_dir=save_dir, use_peerflix=use_peerflix, select_index=sf["index"])
+            print_pack_files(files, show_non_video=show_all, filter_query=filter_query)
+            continue
+        print(f"\033[1;31mInvalid choice. Enter 0-{len(selectable)-1}, '/query', {'\'p\', ' if videos else ''}'a', 'b', or 'q'.\033[0m")
+
+def display_results_table(results, display_limit, hidden_count=0, min_seeds=2, showing_all=False):
+    term_width = shutil.get_terminal_size((100, 24)).columns
+    line = "─" * min(term_width - 2, 118)
+    print(f" {'#':<3}  {'HEALTH':<7}  {'SEED':>6}  {'LEECH':>5}   {'SIZE':>9}   {'NAME'}")
+    print(f" {line}")
+
+    max_display = min(len(results), max(1, display_limit))
+    for idx in range(max_display):
+        item = results[idx]
+        seeds = get_effective_seeders(item)
+        leechers = get_effective_leechers(item)
+        size_str = format_size(item.get("size", 0))
+        name = item.get("name", "Unknown")
+        _code, health_badge = classify_health(item)
+
+        seed_str = f"{seeds}" if item.get("scrape_verified") else f"~{seeds}"
+        if seeds >= 50:
+            seed_color = f"\033[1;32m{seed_str:>6}\033[0m"
+        elif seeds >= 10:
+            seed_color = f"\033[1;33m{seed_str:>6}\033[0m"
+        elif seeds >= 2:
+            seed_color = f"\033[0;33m{seed_str:>6}\033[0m"
+        else:
+            seed_color = f"\033[0;31m{seed_str:>6}\033[0m"
+
+        print(f" \033[1;37m{idx:<3}\033[0m  {health_badge}  {seed_color}  \033[0;90m{leechers:>5}\033[0m   {size_str:>9}   {highlight_name(name)}")
+
+    print(f" {line}")
+    if len(results) > max_display:
+        print(f" \033[0;90mShowing {max_display} of {len(results)} results (enter 'm' to show more).\033[0m")
+    if hidden_count > 0 and not showing_all:
+        print(f" \033[0;90mFiltered out {hidden_count} dead/low-seed result(s) (< {min_seeds} live seeds). Enter 'z' to show all, or 'v' to probe more rows.\033[0m")
+    elif showing_all and min_seeds > 0:
+        print(" \033[0;90mShowing all results including dead/low-seed rows. Enter 'z' to re-hide.\033[0m")
+    return max_display
+
+def open_prowlarr_ui(path="/indexers"):
+    """Open Prowlarr web UI (defaulting to the Indexers page) in the system browser."""
+    base_url, _ = load_prowlarr_config()
+    base_url = (base_url or "http://127.0.0.1:9696").rstrip("/")
+    target_url = f"{base_url}{path}"
+
+    # Quick reachability check so user gets a clear hint if the service is stopped
+    parsed = urllib.parse.urlparse(base_url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    reachable = False
+    try:
+        with socket.create_connection((host, port), timeout=1.5):
+            reachable = True
+    except OSError:
+        reachable = False
+
+    if not reachable:
+        print(f"\033[1;33m⚠ Prowlarr is not responding at {base_url}.\033[0m")
+        print("  Start it with: \033[1;36msudo systemctl start prowlarr.service\033[0m")
+        return False
+
+    opener = shutil.which("xdg-open") or shutil.which("open")
+    if opener:
+        subprocess.Popen(
+            [opener, target_url],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        print(f"\033[1;32m🌐 Opening Prowlarr Indexers:\033[0m {target_url}")
+        return True
+    print(f"\033[1;36mOpen in your browser:\033[0m {target_url}")
+    return True
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help", "help"]:
+    if len(sys.argv) > 1 and sys.argv[1] in ["-h", "--help", "help"]:
         print(HELP_TEXT)
         sys.exit(0)
 
-    if sys.argv[1] in ["-s", "--stream"] and len(sys.argv) > 2:
+    if len(sys.argv) == 2 and sys.argv[1].lower() in ["prowlarr", "--prowlarr", "--indexers", "indexers"]:
+        open_prowlarr_ui()
+        sys.exit(0)
+
+    if len(sys.argv) > 2 and sys.argv[1] in ["-s", "--stream"]:
         magnet = sys.argv[2]
         extra_args = sys.argv[3:]
         subprocess.run(["stream-torrent", magnet] + extra_args)
@@ -295,10 +1792,15 @@ def main():
 
     save_dir = None
     limit = 25
+    min_seeds = 2
+    include_dead = False
+    probe_top = 5
+    no_probe = False
+    use_prowlarr = True
+    prowlarr_only = False
     target_episode = None
     playlist_mode = False
     use_peerflix = False
-    interactive_mode = True
     query_parts = []
 
     i = 1
@@ -319,18 +1821,54 @@ def main():
             except ValueError:
                 pass
             i += 1
+        elif arg in ["--min-seeds"] and i + 1 < len(sys.argv):
+            try:
+                min_seeds = max(0, int(sys.argv[i + 1]))
+            except ValueError:
+                pass
+            i += 2
+        elif arg.startswith("--min-seeds="):
+            try:
+                min_seeds = max(0, int(arg.split("=", 1)[1]))
+            except ValueError:
+                pass
+            i += 1
+        elif arg in ["--all", "--include-dead"]:
+            include_dead = True
+            i += 1
+        elif arg in ["--no-probe"]:
+            no_probe = True
+            i += 1
+        elif arg in ["--prowlarr-only"]:
+            prowlarr_only = True
+            use_prowlarr = True
+            i += 1
+        elif arg in ["--no-prowlarr"]:
+            use_prowlarr = False
+            prowlarr_only = False
+            i += 1
+        elif arg in ["--probe-top"] and i + 1 < len(sys.argv):
+            try:
+                probe_top = max(0, int(sys.argv[i + 1]))
+            except ValueError:
+                pass
+            i += 2
+        elif arg.startswith("--probe-top="):
+            try:
+                probe_top = max(0, int(arg.split("=", 1)[1]))
+            except ValueError:
+                pass
+            i += 1
         elif arg in ["-e", "--episode", "--ep"] and i + 1 < len(sys.argv):
             target_episode = sys.argv[i + 1].lstrip("eE")
             i += 2
         elif arg.startswith("--episode=") or arg.startswith("--ep="):
             target_episode = arg.split("=", 1)[1].lstrip("eE")
             i += 1
-        elif arg in ["-p", "--playlist", "--all"]:
+        elif arg in ["-p", "--playlist", "--all-episodes"]:
             playlist_mode = True
-            interactive_mode = False
             i += 1
         elif arg in ["-i", "--interactive"]:
-            interactive_mode = True
             playlist_mode = False
             i += 1
         elif arg in ["--peerflix"]:
@@ -340,93 +1878,181 @@ def main():
             query_parts.append(arg)
             i += 1
 
+    effective_min_seeds = 0 if include_dead else min_seeds
+    meta_dir = Path(tempfile.mkdtemp(prefix="watchtv-meta-"))
+    atexit.register(shutil.rmtree, meta_dir, True)
+
     clean_query = sanitize_query(query_parts)
-    if not clean_query:
-        print(HELP_TEXT)
-        sys.exit(0)
-
-    print(f"\033[1;34m🔍 Searching for: \"{clean_query}\"...\033[0m\n")
-
-    try:
-        results = search_torrents(clean_query, target_episode)
-    except Exception as e:
-        print(f"\033[1;31mError searching index: {e}\033[0m")
-        sys.exit(1)
-
-    if not results:
-        print(f"\033[1;33mNo results found for \"{clean_query}\".\033[0m")
-        print("Tip: Try searching with fewer words or omitting years/resolutions.")
-        sys.exit(0)
-
-    term_width = shutil.get_terminal_size((100, 24)).columns
-
-    print(f" {'#':<3}  {'SEED':>6}   {'SIZE':>9}   {'NAME'}")
-    print(" " + "─" * (min(term_width - 2, 110)))
-
-    max_display = min(len(results), max(1, limit))
-    for idx in range(max_display):
-        item = results[idx]
-        seeds = int(item.get("seeders", 0))
-        size_str = format_size(item.get("size", 0))
-        name = item.get("name", "Unknown")
-
-        # Colorize seed count (green for high, yellow for medium, red for low)
-        if seeds >= 50:
-            seed_color = f"\033[1;32m{seeds:>6}\033[0m"
-        elif seeds >= 10:
-            seed_color = f"\033[1;33m{seeds:>6}\033[0m"
-        else:
-            seed_color = f"\033[0;31m{seeds:>6}\033[0m"
-
-        highlighted = highlight_name(name)
-        print(f" \033[1;37m{idx:<3}\033[0m  {seed_color}   {size_str:>9}   {highlighted}")
-
-    print(" " + "─" * (min(term_width - 2, 110)))
 
     while True:
-        try:
-            prompt_str = f"\n\033[1;36mSelect a number (0-{max_display-1}) [or append 'p' for playlist, e.g. '0p'], or 'q' to quit:\033[0m "
-            choice = input(prompt_str).strip()
-        except (KeyboardInterrupt, EOFError):
-            print("\nExiting.")
-            sys.exit(0)
-
-        if choice.lower() in ["q", "quit", "exit"]:
-            sys.exit(0)
-
-        # Check if choice specifies playlist mode suffix, e.g. "0p"
-        choice_clean = choice
-        row_playlist = playlist_mode
-        if choice.lower().endswith("p") and choice[:-1].isdigit():
-            choice_clean = choice[:-1]
-            row_playlist = True
-
-        if choice_clean.isdigit() and 0 <= int(choice_clean) < max_display:
-            selected = results[int(choice_clean)]
-            info_hash = selected["info_hash"]
-            name = selected.get("name", "video")
-            magnet = f"magnet:?xt=urn:btih:{info_hash}&dn={urllib.parse.quote(name)}"
-
-            cmd = ["stream-torrent", magnet]
-            if save_dir:
-                cmd += ["-o", save_dir]
-            if use_peerflix:
-                cmd += ["--peerflix"]
-            if row_playlist:
-                cmd += ["--playlist"]
-            elif target_episode:
-                cmd += ["-e", str(target_episode)]
-            elif interactive_mode:
-                cmd += ["-i"]
-
-            print(f"\n\033[1;32m▶ Streaming:\033[0m {name}\n")
+        while not clean_query:
             try:
-                subprocess.run(cmd)
-            except KeyboardInterrupt:
-                pass
-            break
-        else:
-            print(f"\033[1;31mInvalid choice. Please enter a number between 0 and {max_display-1}.\033[0m")
+                raw_in = input("\033[1;36m🔍 Search movies, shows, or anime ('h' for help, 'q' to quit):\033[0m ").strip()
+            except (KeyboardInterrupt, EOFError):
+                print("\nExiting.")
+                sys.exit(0)
+            if raw_in.lower() in ["q", "quit", "exit"]:
+                sys.exit(0)
+            if raw_in.lower() in ["h", "help", "?"]:
+                print(HELP_TEXT)
+                continue
+            if raw_in.lower() in ["prowlarr", "idx", "indexers"]:
+                open_prowlarr_ui()
+                continue
+            clean_query = sanitize_query([raw_in])
+
+        print(f"\n\033[1;34m🔍 Searching for: \"{clean_query}\"...\033[0m\n")
+
+        try:
+            visible_results, all_results, used_fallback = search_torrents(
+                clean_query,
+                target_episode,
+                min_seeds=effective_min_seeds,
+                probe_top=probe_top,
+                no_probe=no_probe,
+                use_prowlarr=use_prowlarr,
+                prowlarr_only=prowlarr_only,
+            )
+        except Exception as e:
+            print(f"\033[1;31mError searching index: {e}\033[0m")
+            clean_query = ""
+            continue
+
+        if not visible_results:
+            print(f"\033[1;33mNo results found for \"{clean_query}\".\033[0m")
+            print("Tip: Try searching with fewer words or omitting years/resolutions.")
+            clean_query = ""
+            continue
+
+        if used_fallback:
+            print(f"\033[1;33m⚠ No results met >= {effective_min_seeds} live seeders; showing remaining low-seed results.\033[0m\n")
+
+        show_all_seeds = include_dead
+        active_results = all_results if show_all_seeds else visible_results
+        hidden_count = max(0, len(all_results) - len(visible_results))
+        current_limit = max(1, limit)
+        max_display = display_results_table(
+            active_results, current_limit,
+            hidden_count=hidden_count, min_seeds=effective_min_seeds, showing_all=show_all_seeds,
+        )
+
+        while True:
+            try:
+                more_hint = "  |  [m] More" if len(active_results) > max_display else ""
+                prompt_str = (
+                    f"\n\033[1;36mSelect # (0-{max_display-1}) or '<#>p' playlist  "
+                    f"|  [v [#]] Verify  |  [z] Low-seed  |  [/query] Search{more_hint}  |  [r] Redraw  |  [q] Quit:\033[0m "
+                )
+                choice = input(prompt_str).strip()
+            except (KeyboardInterrupt, EOFError):
+                print("\nExiting.")
+                sys.exit(0)
+
+            low = choice.lower()
+            if low in ["q", "quit", "exit"]:
+                sys.exit(0)
+            if low in ["h", "help", "?"]:
+                print(HELP_TEXT)
+                continue
+            if low in ["prowlarr", "idx", "indexers"]:
+                open_prowlarr_ui()
+                continue
+            if low == "r":
+                max_display = display_results_table(
+                    active_results, current_limit,
+                    hidden_count=hidden_count, min_seeds=effective_min_seeds, showing_all=show_all_seeds,
+                )
+                continue
+            if low == "z":
+                show_all_seeds = not show_all_seeds
+                active_results = all_results if show_all_seeds else visible_results
+                max_display = display_results_table(
+                    active_results, current_limit,
+                    hidden_count=hidden_count, min_seeds=effective_min_seeds, showing_all=show_all_seeds,
+                )
+                continue
+            if low == "v" or low.startswith("v ") or (low.startswith("v") and low[1:].isdigit()):
+                v_arg = low[1:].strip()
+                if v_arg.isdigit():
+                    v_idx = int(v_arg)
+                    if 0 <= v_idx < max_display:
+                        sys.stdout.write(f"\r\033[1;34m⏳ Probing peer reachability for #{v_idx}...\033[0m")
+                        sys.stdout.flush()
+                        probe_items([active_results[v_idx]], force=True)
+                        print("\r\033[K", end="")
+                        max_display = display_results_table(
+                            active_results, current_limit,
+                            hidden_count=hidden_count, min_seeds=effective_min_seeds, showing_all=show_all_seeds,
+                        )
+                    else:
+                        print(f"\033[1;31mInvalid row for verify. Enter 0-{max_display-1}.\033[0m")
+                else:
+                    sys.stdout.write(f"\r\033[1;34m⏳ Probing peer reachability for {max_display} visible results...\033[0m")
+                    sys.stdout.flush()
+                    probe_items(active_results[:max_display])
+                    print("\r\033[K", end="")
+                    active_results.sort(key=calculate_rank_score, reverse=True)
+                    max_display = display_results_table(
+                        active_results, current_limit,
+                        hidden_count=hidden_count, min_seeds=effective_min_seeds, showing_all=show_all_seeds,
+                    )
+                continue
+            if low == "m" and len(active_results) > max_display:
+                current_limit += 25
+                max_display = display_results_table(
+                    active_results, current_limit,
+                    hidden_count=hidden_count, min_seeds=effective_min_seeds, showing_all=show_all_seeds,
+                )
+                continue
+            if choice.startswith("/") and len(choice) > 1:
+                clean_query = sanitize_query([choice[1:]])
+                target_episode = None
+                break
+            if low.startswith("s ") and len(choice) > 2:
+                clean_query = sanitize_query([choice[2:]])
+                target_episode = None
+                break
+
+            choice_clean = choice
+            row_playlist = playlist_mode
+            if low.endswith("p") and choice[:-1].isdigit():
+                choice_clean = choice[:-1]
+                row_playlist = True
+
+            if choice_clean.isdigit() and 0 <= int(choice_clean) < max_display:
+                selected = active_results[int(choice_clean)]
+                torrent_path, files = fetch_torrent_metadata(
+                    selected.get("info_hash", ""),
+                    selected.get("name", "video"),
+                    meta_dir,
+                    download_url=selected.get("download_url", ""),
+                    selected_item=selected,
+                )
+                if torrent_path is None or files is None:
+                    selected["session_failed"] = True
+                    max_display = display_results_table(
+                        active_results, current_limit,
+                        hidden_count=hidden_count, min_seeds=effective_min_seeds, showing_all=show_all_seeds,
+                    )
+                    continue
+
+                action = browse_torrent_pack(
+                    selected,
+                    torrent_path,
+                    files,
+                    save_dir,
+                    use_peerflix,
+                    target_episode,
+                    row_playlist,
+                )
+                if action == "quit":
+                    sys.exit(0)
+                max_display = display_results_table(
+                    active_results, current_limit,
+                    hidden_count=hidden_count, min_seeds=effective_min_seeds, showing_all=show_all_seeds,
+                )
+            else:
+                print(f"\033[1;31mInvalid choice. Enter 0-{max_display-1}, '<#>p', 'v [#]', 'z', '/new search', 'r', or 'q'.\033[0m")
 
 if __name__ == "__main__":
     main()

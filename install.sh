@@ -263,6 +263,10 @@ if [[ -f "$HOME/.config/systemd/user/surrey-rentals.service" ]] && command -v sy
   systemctl --user daemon-reload 2>/dev/null || true
   systemctl --user enable --now surrey-rentals.service 2>/dev/null || true
 fi
+if [[ -f "$HOME/.config/systemd/user/bisvo.service" ]] && [[ -x "$HOME/bisvo/run.sh" ]] && command -v systemctl &>/dev/null; then
+  systemctl --user daemon-reload 2>/dev/null || true
+  systemctl --user enable --now bisvo.service 2>/dev/null || true
+fi
 
 # Fix permissions
 chmod 700 "$HOME/.config/cliamp" 2>/dev/null || true

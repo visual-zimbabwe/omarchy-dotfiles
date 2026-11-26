@@ -93,6 +93,7 @@ copy_clean "$HOME_DIR/.config/newsboat" "$REPO_DIR/config/newsboat"
 copy_clean "$HOME_DIR/.config/mise" "$REPO_DIR/config/mise"
 copy_clean "$HOME_DIR/.config/nvim" "$REPO_DIR/config/nvim"
 copy_clean "$HOME_DIR/.config/hypr" "$REPO_DIR/config/hypr"
+copy_clean "$HOME_DIR/.config/fontconfig" "$REPO_DIR/config/fontconfig"
 copy_clean "$HOME_DIR/.config/omarchy" "$REPO_DIR/config/omarchy"
 
 # VS Code settings
@@ -102,6 +103,7 @@ mkdir -p "$REPO_DIR/config/Code/User"
 # Systemd user services
 mkdir -p "$REPO_DIR/config/systemd/user"
 [[ -f "$HOME_DIR/.config/systemd/user/surrey-rentals.service" ]] && cp -f "$HOME_DIR/.config/systemd/user/surrey-rentals.service" "$REPO_DIR/config/systemd/user/surrey-rentals.service"
+[[ -f "$HOME_DIR/.config/systemd/user/bisvo.service" ]] && cp -f "$HOME_DIR/.config/systemd/user/bisvo.service" "$REPO_DIR/config/systemd/user/bisvo.service"
 
 # Git config (sanitize gh credential helper to be system-agnostic)
 if [[ -f "$HOME_DIR/.config/git/config" ]]; then

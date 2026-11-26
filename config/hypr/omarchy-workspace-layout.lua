@@ -196,7 +196,7 @@ W.specs["wide-centre"] = { kind = "ratio", orientation = "columns", overflow = "
 W.specs["stacked"] = { kind = "ratio", orientation = "rows", overflow = "last", fill = "largest", underfill = "rescale", grid_columns = 0, weights = { 50, 50 } }
 W.specs["grid"] = { kind = "grid", orientation = "columns", overflow = "extend", fill = "largest", underfill = "rescale", grid_columns = 0, weights = { 25, 18.75, 18.75, 37.5 } }
 W.specs["two-rows-four-columns"] = { kind = "grid", orientation = "columns", overflow = "extend", fill = "largest", underfill = "rescale", grid_columns = 4, weights = { 12.5, 12.5, 25, 25, 25 } }
-W.specs["custom"] = { kind = "ratio", orientation = "columns", overflow = "extend", fill = "largest", underfill = "rescale", grid_columns = 0, weights = { 20, 20, 20, 20, 20 } }
+W.specs["custom"] = { kind = "ratio", orientation = "columns", overflow = "extend", fill = "largest", underfill = "rescale", grid_columns = 0, weights = { 16.65, 16.67, 16.67, 16.67, 16.67, 16.67 } }
 
 W.register("even")
 W.register("focus")
@@ -211,13 +211,13 @@ W.register("two-rows-four-columns")
 W.register("custom")
 
 W.set_workspace("1", "lua:omarchy-wsl-golden")
-W.set_workspace("2", "lua:omarchy-wsl-two-rows-four-columns")
+W.set_workspace("2", "lua:omarchy-wsl-grid")
 W.set_workspace("3", "lua:omarchy-wsl-two-rows-four-columns")
 W.set_workspace("4", "lua:omarchy-wsl-two-rows-four-columns")
-W.set_workspace("5", "dwindle")
-W.set_workspace("6", "dwindle")
+W.set_workspace("5", "lua:omarchy-wsl-custom")
+W.set_workspace("6", "lua:omarchy-wsl-custom")
 W.set_workspace("7", "dwindle")
 W.set_workspace("8", "dwindle")
 W.set_workspace("9", "dwindle")
 W.set_workspace("10", "dwindle")
-W.set_workspace("12", "dwindle")
+W.set_workspace("11", "dwindle")
