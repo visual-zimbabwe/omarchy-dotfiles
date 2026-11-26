@@ -19,19 +19,19 @@ if has_edp then
     scale = 1.6,
   })
 
-  -- Samsung Odyssey G91SD / External Ultrawide Display (Above laptop)
+  -- Samsung Odyssey G91SD / External Ultrawide Display (Centered above laptop)
   hl.monitor({
     output = "HDMI-A-1",
     mode = "preferred",
-    position = "auto-up",
-    scale = 1.25,
+    position = "auto-center-up",
+    scale = 1.0,
     vrr = 1,
   })
 
   hl.monitor({
     output = "DP-1",
     mode = "preferred",
-    position = "auto-up",
+    position = "auto-center-up",
     scale = 1.0,
     vrr = 1,
   })
@@ -39,7 +39,7 @@ if has_edp then
   hl.monitor({
     output = "DP-2",
     mode = "preferred",
-    position = "auto-up",
+    position = "auto-center-up",
     scale = 1.0,
     vrr = 1,
   })
