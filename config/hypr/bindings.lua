@@ -31,3 +31,44 @@
 o.bind("SUPER + N", "Notification Center", "omarchy-shell jankeesvw.notification-center toggle")
 o.bind("SUPER + CTRL + J", "omanki", "omarchy-shell shell toggle yamz8.omanki")
 
+-- Restore classic Hyprland global workspaces (1-10 shared across all monitors),
+-- disabling Omarchy's per-monitor workspace blocks (default/hypr/monitor-workspaces.lua).
+if o.workspaces then
+  o.workspaces.reconcile = function() end
+  function o.workspaces.workspace_id(_, slot)
+    return slot
+  end
+  function o.workspaces.focus(slot)
+    return hl.dsp.focus({ workspace = tostring(slot) })
+  end
+  function o.workspaces.move_window(slot, follow)
+    return hl.dsp.window.move({ workspace = tostring(slot), follow = follow ~= false })
+  end
+  function o.workspaces.move_to_monitor(direction)
+    return function()
+      local target = hl.get_monitor(direction)
+      if target then
+        hl.dispatch(hl.dsp.workspace.move({ monitor = target.name }))
+      end
+    end
+  end
+end
+
+for workspace = 1, 10 do
+  local key = "code:" .. tostring(workspace + 9)
+  o.rebind("SUPER + " .. key, "Switch to workspace " .. workspace, hl.dsp.focus({ workspace = tostring(workspace) }))
+  o.rebind("SUPER + SHIFT + " .. key, "Move window to workspace " .. workspace, hl.dsp.window.move({ workspace = tostring(workspace), follow = true }))
+  o.rebind("SUPER + SHIFT + ALT + " .. key, "Move window silently to workspace " .. workspace, hl.dsp.window.move({ workspace = tostring(workspace), follow = false }))
+end
+
+o.rebind("SUPER + TAB", "Next workspace", hl.dsp.focus({ workspace = "e+1" }))
+o.rebind("SUPER + SHIFT + TAB", "Previous workspace", hl.dsp.focus({ workspace = "e-1" }))
+o.rebind("SUPER + CTRL + TAB", "Former workspace", hl.dsp.focus({ workspace = "previous" }))
+o.rebind("SUPER + mouse_down", "Scroll active workspace forward", hl.dsp.focus({ workspace = "e+1" }))
+o.rebind("SUPER + mouse_up", "Scroll active workspace backward", hl.dsp.focus({ workspace = "e-1" }))
+
+o.rebind("SUPER + SHIFT + ALT + LEFT", "Move workspace to left monitor", o.workspaces.move_to_monitor("l"))
+o.rebind("SUPER + SHIFT + ALT + RIGHT", "Move workspace to right monitor", o.workspaces.move_to_monitor("r"))
+o.rebind("SUPER + SHIFT + ALT + UP", "Move workspace to up monitor", o.workspaces.move_to_monitor("u"))
+o.rebind("SUPER + SHIFT + ALT + DOWN", "Move workspace to down monitor", o.workspaces.move_to_monitor("d"))
+
